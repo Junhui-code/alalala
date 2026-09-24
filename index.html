@@ -656,7 +656,7 @@ function buildTrack(ti) {
     const i0 = fr0 == null ? 0 : Math.round(fr0 * N), i1 = fr1 == null ? N : Math.round(fr1 * N);
     for (const [ctx, st] of [[c, style], [mk, surf]]) {
       if (st == null) continue;
-      ctx.save(); ctx.lineJoin = 'round'; ctx.lineCap = fr0 == null ? 'round' : 'butt'; ctx.lineWidth = w; ctx.strokeStyle = st;
+      ctx.save(); ctx.lineJoin = 'round'; ctx.lineCap = (fr0 == null && !dash) ? 'round' : 'butt'; ctx.lineWidth = w; ctx.strokeStyle = st;
       if (dash) ctx.setLineDash(dash);
       path(ctx, i0, i1); ctx.stroke(); ctx.restore();
     }
@@ -776,7 +776,7 @@ function buildTrack(ti) {
   return T;
 }
 function gridSlot(T, s) {
-  const row = s >> 1, col = s & 1, back = 26 + row * 26 + col * 10, i = (T.N - Math.round(back / T.step)) % T.N, lat = (col ? 1 : -1) * T.hw * 0.42;
+  const row = s >> 1, col = s & 1, back = 26 + row * 36 + col * 14, i = (T.N - Math.round(back / T.step)) % T.N, lat = (col ? 1 : -1) * T.hw * 0.42;
   return { i, x: T.X[i] - T.TY[i] * lat, y: T.Y[i] + T.TX[i] * lat, a: Math.atan2(T.TY[i], T.TX[i]) };
 }
 function buildMinimap(T, size) {
@@ -812,7 +812,7 @@ function createRace(opts) {
     laps: opts.mode === 'attract' ? 9999 : LAPS, time: 0, cd: opts.mode === 'attract' ? 3 : 0, cdStep: -1,
     phase: opts.mode === 'attract' ? 'race' : 'countdown',
     karts: [], proj: [], parts: [], boxes: [], coins: [], humans: [], views: [], flash: 0, endT: 0, done: false,
-    lastLightning: -99, items: opts.mode !== 'tt', engines: [], attractT: 0,
+    lastLightning: -99, items: opts.mode !== 'tt', engines: [], attractT: 0, stats: {},
   };
   const skills = [1.0, 0.99, 0.975, 0.965, 0.955, 0.945, 0.935, 0.925].sort(() => Math.random() - 0.5);
   opts.grid.forEach((racer, slot) => {
@@ -880,7 +880,7 @@ function stepRace(R, dt) {
     const inp = (k.human >= 0 && !k.auto) ? readInput(k.human, R.humans.length > 1) : aiInput(k, R, dt);
     updateKart(k, inp, dt, R);
   }
-  kartCollisions(R);
+  kartCollisions(R, dt);
   updateProjectiles(R, dt);
   // 道具箱
   for (const b of R.boxes) {
@@ -959,7 +959,7 @@ function updateKart(k, inp, dt, R) {
   if (k.shrinkT > 0) max *= 0.68;
   const grounded = k.z <= 0 && k.vz <= 0;
   const surf = T.surfAt(k.x, k.y);
-  if (grounded && T.padAt(k.x, k.y)) { if (k.boostT < 0.5) sfxK(R, k, 'boost'); k.boostT = Math.max(k.boostT, 0.9); k.boostPow = 1.4; }
+  if (grounded && onPad(T, k)) { if (k.boostT < 0.5) sfxK(R, k, 'boost'); k.boostT = Math.max(k.boostT, 0.9); k.boostPow = 1.4; }
   const boosting = k.boostT > 0, star = k.starT > 0;
   const off = surf === S_OFF && grounded && !boosting && !star;
   if (star) max *= 1.15;
@@ -1041,6 +1041,13 @@ function updateKart(k, inp, dt, R) {
   updateProgress(k, R, dt);
 }
 
+// 加速板：车身四角或前后中点任意一点压到即可触发
+function onPad(T, k) {
+  const b = kartBox(k);
+  for (const [u, v] of [[0, 0], [1, 1], [1, -1], [-1, 1], [-1, -1], [1, 0], [-1, 0]])
+    if (T.padAt(b.x + b.fx * b.hl * u + b.rx * b.hw * v, b.y + b.fy * b.hl * u + b.ry * b.hw * v)) return true;
+  return false;
+}
 function moveKart(k, dt, R) {
   const T = R.track, nx = k.x + k.vx * dt, ny = k.y + k.vy * dt, sp = Math.hypot(k.vx, k.vy);
   const lx = nx + (sp > 1 ? k.vx / sp * 6 : 0), ly = ny + (sp > 1 ? k.vy / sp * 6 : 0);
@@ -1085,8 +1092,10 @@ function updateFall(k, dt, R) {
   f.t += dt;
   if (!f.placed) {
     if (f.t < 0.7) { k.x += k.vx * dt * 0.5; k.y += k.vy * dt * 0.5; k.z = -f.t * 26; return; }
+    // 从掉落处往回找：该点及其前方约 60 单位的中心线都必须是路面，避免重生后直接冲进同一个坑
+    const safeAhead = j => { for (let q = 0; q <= 15; q++) { const m = (j + q) % T.N; if (T.surfAt(T.X[m], T.Y[m]) !== S_ROAD) return false; } return true; };
     let i = (k.idx - 3 + T.N) % T.N;
-    for (let s = 0; s < 60 && T.surfAt(T.X[i], T.Y[i]) !== S_ROAD; s++) i = (i - 1 + T.N) % T.N;
+    for (let s = 0; s < 150 && !safeAhead(i); s++) i = (i - 1 + T.N) % T.N;
     k.x = T.X[i]; k.y = T.Y[i]; k.angle = Math.atan2(T.TY[i], T.TX[i]); k.vx = k.vy = 0; k.z = 46; k.vz = 0; k.idx = i;
     f.placed = true; if (k.human >= 0 && !k.auto) sfx('respawn');
     const v = viewOf(R, k); if (v) v.cam.angle = k.angle;
@@ -1183,13 +1192,14 @@ function lightning(R, k) {
 }
 function hitKart(R, k, kind) {
   if (k.starT > 0 || k.invT > 0 || k.fall) return false;
-  k.spinT = kind === 'banana' ? 0.9 : 1.3; k.invT = k.spinT + 0.5; k.drift = 0; k.driftLevel = 0; k.boostT = 0;
-  if (kind !== 'banana') { k.vz = 85; k.z = 0.01; k.hopping = false; }
-  const lost = Math.min(k.coins, kind === 'banana' ? 2 : 3); k.coins -= lost;
+  k.spinT = kind === 'banana' ? 0.9 : kind === 'bump' ? 0.8 : 1.3; k.invT = k.spinT + 0.5; k.drift = 0; k.driftLevel = 0; k.boostT = 0;
+  if (kind === 'shell') { k.vz = 85; k.z = 0.01; k.hopping = false; }
+  const lost = kind === 'bump' ? 0 : Math.min(k.coins, kind === 'banana' ? 2 : 3); k.coins -= lost;
   for (let i = 0; i < lost; i++) addPart(R, k.x, k.y, 8, rand(-60, 60), rand(-60, 60), rand(90, 150), 0.8, 'coin', 5, 300);
   for (let i = 0; i < 8; i++) addPart(R, k.x, k.y, 10, rand(-50, 50), rand(-50, 50), rand(40, 100), 0.5, '#fff27a', 1.5, 120);
   if (k.itemState === 'hold') { k.item = null; k.itemState = 'none'; }
-  sfxK(R, k, 'hit');
+  sfxK(R, k, kind === 'bump' ? 'spin' : 'hit');
+  if (R.stats) R.stats[kind] = (R.stats[kind] || 0) + 1;
   return true;
 }
 function killProj(R, p) {
@@ -1261,28 +1271,63 @@ function updateProjectiles(R, dt) {
   }
   R.proj = R.proj.filter(p => p.alive);
 }
-function kartCollisions(R) {
+// 赛车碰撞体积：带朝向的矩形（半长 KART_HL，半宽 KART_HW）
+const KART_HL = 9.5, KART_HW = 6.5;
+function kartBox(k) {
+  const s = k.shrinkT > 0 ? 0.55 : 1, c = Math.cos(k.angle), n = Math.sin(k.angle);
+  return { x: k.x, y: k.y, fx: c, fy: n, rx: -n, ry: c, hl: KART_HL * s, hw: KART_HW * s };
+}
+// 分离轴检测，返回最小穿透方向（从 A 指向 B）与深度
+function boxOverlap(A, B) {
+  const dx = B.x - A.x, dy = B.y - A.y;
+  let best = 1e9, nx = 0, ny = 0;
+  for (const [ax, ay] of [[A.fx, A.fy], [A.rx, A.ry], [B.fx, B.fy], [B.rx, B.ry]]) {
+    const ra = A.hl * Math.abs(A.fx * ax + A.fy * ay) + A.hw * Math.abs(A.rx * ax + A.ry * ay);
+    const rb = B.hl * Math.abs(B.fx * ax + B.fy * ay) + B.hw * Math.abs(B.rx * ax + B.ry * ay);
+    const d = dx * ax + dy * ay, ov = ra + rb - Math.abs(d);
+    if (ov <= 0) return null;
+    if (ov < best) { best = ov; const sg = d < 0 ? -1 : 1; nx = ax * sg; ny = ay * sg; }
+  }
+  return { nx, ny, depth: best };
+}
+function kartCollisions(R, dt) {
   const ks = R.karts;
   for (let i = 0; i < ks.length; i++) for (let j = i + 1; j < ks.length; j++) {
     const a = ks[i], b = ks[j];
     if (a.fall || b.fall || Math.abs(a.z - b.z) > 6) continue;
-    const ra = a.shrinkT > 0 ? 4 : 7, rb = b.shrinkT > 0 ? 4 : 7;
-    const dx = b.x - a.x, dy = b.y - a.y, d2 = dx * dx + dy * dy, rr = ra + rb;
-    if (d2 >= rr * rr || d2 < 0.0001) continue;
+    const dx = b.x - a.x, dy = b.y - a.y;
+    if (dx * dx + dy * dy > 30 * 30) continue;
+    const hit = boxOverlap(kartBox(a), kartBox(b));
+    if (!hit) continue;
     // 无敌星 / 压扁
     if (a.starT > 0 && b.starT <= 0) { hitKart(R, b, 'shell'); continue; }
     if (b.starT > 0 && a.starT <= 0) { hitKart(R, a, 'shell'); continue; }
     if (a.shrinkT > 0 && b.shrinkT <= 0 && a.squishT <= 0) { a.squishT = 1.4; a.spinT = 0; sfxK(R, a, 'squish'); }
     if (b.shrinkT > 0 && a.shrinkT <= 0 && b.squishT <= 0) { b.squishT = 1.4; b.spinT = 0; sfxK(R, b, 'squish'); }
-    const d = Math.sqrt(d2), nx = dx / d, ny = dy / d, ov = rr - d;
+    const { nx, ny, depth } = hit;
     const wa = a.stats.weight * (a.shrinkT > 0 ? 0.4 : 1), wb = b.stats.weight * (b.shrinkT > 0 ? 0.4 : 1);
-    a.x -= nx * ov * wb / (wa + wb); a.y -= ny * ov * wb / (wa + wb);
-    b.x += nx * ov * wa / (wa + wb); b.y += ny * ov * wa / (wa + wb);
-    const rv = (b.vx - a.vx) * nx + (b.vy - a.vy) * ny;
-    if (rv < 0) {
-      const J = -1.6 * rv / (1 / wa + 1 / wb);
+    // 推开：不允许重叠，重的车被推得少
+    a.x -= nx * depth * wb / (wa + wb); a.y -= ny * depth * wb / (wa + wb);
+    b.x += nx * depth * wa / (wa + wb); b.y += ny * depth * wa / (wa + wb);
+    const closing = (a.vx - b.vx) * nx + (a.vy - b.vy) * ny;   // >0 表示正在靠近
+    const afx = Math.cos(a.angle), afy = Math.sin(a.angle), bfx = Math.cos(b.angle), bfy = Math.sin(b.angle);
+    const aN = afx * nx + afy * ny, bN = bfx * nx + bfy * ny;
+    // 追尾：后车车头对准前车车尾、两车同向，且接近速度够快 → 前车原地转圈
+    let rear = null;
+    if (closing > 45 && aN > 0.75 && bN > 0.55) rear = b;        // A 撞 B 的尾部
+    else if (closing > 45 && aN < -0.55 && bN < -0.75) rear = a; // B 撞 A 的尾部
+    const side = Math.abs(aN) < 0.6 || Math.abs(bN) < 0.6;
+    if (closing > 0) {
+      const J = (rear ? 1.3 : side ? 1.1 : 1.45) * closing / (1 / wa + 1 / wb);
       a.vx -= J / wa * nx; a.vy -= J / wa * ny; b.vx += J / wb * nx; b.vy += J / wb * ny;
-      if (-rv > 25 && (a.human >= 0 || b.human >= 0)) sfxK(R, a.human >= 0 ? a : b, 'bump');
+      if (closing > 25 && (a.human >= 0 || b.human >= 0)) sfxK(R, a.human >= 0 ? a : b, 'bump');
+    }
+    if (rear && R.time > 2.5) { hitKart(R, rear, 'bump'); continue; }   // 起跑混战时只推开不转圈
+    // 并排摩擦：侧面贴在一起时双方都略微减速
+    if (side) {
+      const f = Math.exp(-0.5 * dt);
+      a.vx *= f; a.vy *= f; b.vx *= f; b.vy *= f;
+      if (Math.random() < 0.3) addPart(R, (a.x + b.x) / 2, (a.y + b.y) / 2, 3, rand(-40, 40), rand(-40, 40), rand(30, 70), 0.25, '#ffe9a0', 1);
     }
   }
 }
@@ -1299,7 +1344,14 @@ function aiInput(k, R, dt) {
   if (ai.dodgeT <= 0) {
     const myLat = lane * T.hw;
     const threats = [];
+    // 前方的固定危险（坑洞、岩浆），躲避时不能往这些位置躲
+    const hz = T.hazards.filter(h => { const rel = (h.i - k.idx + N) % N; return rel > 0 && rel < look * 3; });
     for (const p of R.proj) if (p.type === 'banana') threats.push({ x: p.x, y: p.y, r: 10 });
+    for (const o of R.karts) {
+      if (o === k || o.fall) continue;
+      const dx = o.x - k.x, dy = o.y - k.y, ahead = dx * Math.cos(k.angle) + dy * Math.sin(k.angle);
+      if (ahead > 8 && ahead < 60 + sp * 0.25 && Math.hypot(o.vx, o.vy) < sp - 8) threats.push({ x: o.x, y: o.y, r: 9 });
+    }
     for (const h of T.hazards) { const rel = (h.i - k.idx + N) % N; if (rel > 2 && rel < look * 2.5) threats.push({ x: T.X[h.i] - T.TY[h.i] * h.lat, y: T.Y[h.i] + T.TX[h.i] * h.lat, r: h.r + 8 }); }
     for (const t of threats) {
       const dx = t.x - k.x, dy = t.y - k.y, d = Math.hypot(dx, dy);
@@ -1307,8 +1359,10 @@ function aiInput(k, R, dt) {
       if (dx * Math.cos(k.angle) + dy * Math.sin(k.angle) <= 0) continue;
       const latP = (t.x - T.X[k.idx]) * tx0 + (t.y - T.Y[k.idx]) * ty0;
       if (Math.abs(latP - myLat) < t.r + 8) {
-        let want = latP > 0 ? latP - t.r - 16 : latP + t.r + 16;
-        if (Math.abs(want) > T.hw * 0.85) want = latP > 0 ? latP + t.r + 16 : latP - t.r - 16;
+        const ok = w => Math.abs(w) <= T.hw * 0.85 && !hz.some(h => Math.abs(w - h.lat) < h.r + 10);
+        const w1 = latP > 0 ? latP - t.r - 16 : latP + t.r + 16, w2 = latP > 0 ? latP + t.r + 16 : latP - t.r - 16;
+        const want = ok(w1) ? w1 : ok(w2) ? w2 : null;
+        if (want == null) continue;
         ai.dodge = clamp(want / T.hw, -0.85, 0.85); ai.dodgeT = 0.7; lane = ai.dodge; break;
       }
     }
@@ -1337,7 +1391,14 @@ function aiInput(k, R, dt) {
   if (sp < 10 && R.phase === 'race' && k.spinT <= 0 && k.squishT <= 0 && k.stallT <= 0 && !k.fall) {
     ai.stuck += dt; if (ai.stuck > 2.5) { ai.stuck = 0; respawnKart(k, R); }
   } else ai.stuck = 0;
-  return { steer, accel: sp < vmax, brake: sp > vmax * 1.25, drift: false, item: false };
+  // 正前方很近处有更慢的车：先松油门，避免追尾
+  let blocked = false;
+  for (const o of R.karts) {
+    if (o === k || o.fall) continue;
+    const dx = o.x - k.x, dy = o.y - k.y, ahead = dx * Math.cos(k.angle) + dy * Math.sin(k.angle), side = -dx * Math.sin(k.angle) + dy * Math.cos(k.angle);
+    if (ahead > 0 && ahead < 22 + sp * 0.12 && Math.abs(side) < 13 && (o.vx - k.vx) * Math.cos(k.angle) + (o.vy - k.vy) * Math.sin(k.angle) < -10) blocked = true;
+  }
+  return { steer, accel: sp < vmax && !blocked, brake: sp > vmax * 1.25, drift: false, item: false };
 }
 function aiItems(k, R, dt) {
   if (k.itemState !== 'ready') return;
