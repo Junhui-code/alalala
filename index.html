@@ -1012,7 +1012,6 @@ function updateKart(k, inp, dt, R) {
   const now = T.surfAt(k.x, k.y);
   if (now !== S_DEEP && now !== S_WALL && k.z <= 0) { k.lastSafeX = k.x; k.lastSafeY = k.y; }
   if (now === S_DEEP && k.z <= 0.5) { startFall(k, R); }
-  {
   const bx = k.x - ca * 9, by = k.y - sa * 9, rx = -sa * 6, ry = ca * 6;
   if (k.drift && k.z <= 0 && Math.random() < 0.8) {
     const col = k.driftLevel === 2 ? (Math.random() < 0.5 ? '#ff9a1a' : '#ffe14a') : k.driftLevel === 1 ? (Math.random() < 0.5 ? '#3cc8ff' : '#bdf') : '#e8e8e8';
@@ -1021,7 +1020,6 @@ function updateKart(k, inp, dt, R) {
   if (boosting && Math.random() < 0.9) addPart(R, k.x - ca * 13, k.y - sa * 13, 4, -ca * 60 + rand(-20, 20), -sa * 60 + rand(-20, 20), rand(0, 40), 0.18, Math.random() < 0.5 ? '#ffd23a' : '#ff6a00', 1.8, 0);
   if (off && sp > 30 && Math.random() < 0.5) addPart(R, bx, by, 1, rand(-20, 20), rand(-20, 20), rand(30, 70), 0.35, T.def.theme === 'grass' ? '#8a6a3a' : '#777', 1.4);
   if (star && Math.random() < 0.6) addPart(R, k.x + rand(-8, 8), k.y + rand(-8, 8), rand(2, 14), 0, 0, 20, 0.3, `hsl(${Math.random() * 360},100%,70%)`, 1.2, 0);
-  }
 
   // 道具
   const itemPress = inp.item && !k.prevItem, itemRel = !inp.item && k.prevItem;
