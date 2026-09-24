@@ -1,0 +1,1857 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
+<title>超级像素赛车 Super Pixel Kart</title>
+<style>
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:#000;overflow:hidden;color:#fff;font-family:"PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans CJK SC","Source Han Sans SC",sans-serif;-webkit-user-select:none;user-select:none}
+#wrap{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);background:#000;overflow:hidden}
+#game,#hud{position:absolute;left:0;top:0;width:100%;height:100%}
+#game{image-rendering:pixelated;image-rendering:crisp-edges}
+#hud{pointer-events:none}
+#ui{position:absolute;inset:0;display:flex;align-items:center;justify-content:center}
+#ui.hidden{display:none}
+.shade{position:absolute;inset:0;background:radial-gradient(ellipse at center,rgba(0,0,30,.25),rgba(0,0,30,.75))}
+.panel{position:relative;min-width:20em;max-width:94%;max-height:94%;overflow:auto;padding:.9em 1.4em;background:rgba(12,16,44,.84);border:.16em solid #fff;border-radius:.8em;box-shadow:0 0 0 .16em #000,0 .5em 1.5em rgba(0,0,0,.6);text-align:center}
+.panel.clear{background:none;border:none;box-shadow:none}
+.title{font-size:1.35em;font-weight:900;letter-spacing:.05em;margin:.15em 0 .45em;text-shadow:.08em .08em 0 #000}
+.sub{opacity:.85;font-size:.78em;margin:-.2em 0 .6em}
+.list{display:flex;flex-direction:column;align-items:center}
+.btn{display:block;width:13em;margin:.28em 0;padding:.38em 1em;font:inherit;font-size:.95em;font-weight:700;color:#fff;background:linear-gradient(#3d5bd9,#2438a0);border:.12em solid #fff;border-radius:.5em;cursor:pointer;text-shadow:.06em .06em 0 #000;transition:transform .08s}
+.btn.sel{background:linear-gradient(#ffe066,#ff8a00);color:#222;text-shadow:none;transform:scale(1.06)}
+.btn.dis{opacity:.4;cursor:default}
+.logo{font-size:3em;font-weight:900;font-style:italic;line-height:1.02;letter-spacing:.02em;background:linear-gradient(#fff66b,#ffb300 55%,#e2361d);-webkit-background-clip:text;background-clip:text;color:transparent;-webkit-text-stroke:.035em #1a0a00;filter:drop-shadow(.07em .07em 0 #000);animation:bob 2.4s ease-in-out infinite}
+.logo2{font-size:1.25em;font-weight:900;letter-spacing:.35em;margin:.2em 0 .7em;color:#fff;text-shadow:.08em .08em 0 #d0102a,.14em .14em 0 #000}
+@keyframes bob{0%,100%{transform:translateY(0) rotate(-2deg)}50%{transform:translateY(-.08em) rotate(-1deg)}}
+.cards{display:flex;gap:.7em;justify-content:center;flex-wrap:wrap;margin:.3em 0}
+.card{width:8.6em;padding:.45em;border:.14em solid rgba(255,255,255,.45);border-radius:.6em;background:rgba(255,255,255,.07);cursor:pointer;transition:transform .1s}
+.card.sel{border-color:#ffd23a;background:rgba(255,210,58,.22);transform:translateY(-.25em)}
+.card.dis{opacity:.35}
+.card canvas{width:100%;image-rendering:pixelated;display:block;margin:0 auto}
+.card .nm{font-weight:900;font-size:1em;margin-top:.1em}
+.card .ds{font-size:.62em;opacity:.8;margin-bottom:.2em}
+.bar{height:.42em;background:rgba(0,0,0,.45);border-radius:.2em;margin:.1em 0 .25em;overflow:hidden}.bar i{display:block;height:100%;background:linear-gradient(90deg,#4cf,#9f6)}
+.statl{font-size:.56em;text-align:left;opacity:.9}
+table.res{border-collapse:collapse;margin:.3em auto .5em;font-size:.8em}
+table.res td{padding:.16em .6em;border-bottom:1px solid rgba(255,255,255,.15)}
+table.res tr.me td{background:rgba(255,210,58,.28);font-weight:900}
+table.res td.pl{font-weight:900;font-style:italic}
+.hint{font-size:.6em;opacity:.75;margin-top:.5em;line-height:1.6}
+.keys{font-size:.7em;text-align:left;line-height:1.75;display:grid;grid-template-columns:auto auto auto;gap:0 1.2em}
+.keys b{color:#ffd23a}
+kbd{display:inline-block;padding:0 .35em;border:1px solid rgba(255,255,255,.55);border-radius:.25em;background:rgba(255,255,255,.14);font-family:inherit;font-size:.9em;line-height:1.4}
+.big{font-size:1.7em;font-weight:900}
+.loading{font-size:1.4em;font-weight:900;text-shadow:.08em .08em 0 #000;animation:bob 1s ease-in-out infinite}
+</style>
+</head>
+<body>
+<div id="wrap">
+<canvas id="game" width="384" height="216"></canvas>
+<canvas id="hud"></canvas>
+<div id="ui"></div>
+</div>
+<script>
+'use strict';
+// =====================================================================
+//  超级像素赛车 / SUPER PIXEL KART
+//  SNES 风格 Mode 7 伪 3D 卡丁车。所有图像与声音均由代码程序化生成。
+// =====================================================================
+
+// ---------------------------------------------------------------- utils
+const TAU = Math.PI * 2;
+const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
+const lerp = (a, b, t) => a + (b - a) * t;
+const rand = (a, b) => a + Math.random() * (b - a);
+function angDiff(a, b) { let d = (b - a) % TAU; if (d > Math.PI) d -= TAU; else if (d < -Math.PI) d += TAU; return d; }
+function mkRng(seed) { let s = (seed >>> 0) || 1; return () => { s ^= s << 13; s >>>= 0; s ^= s >>> 17; s ^= s << 5; s >>>= 0; return s / 4294967296; }; }
+function mkCanvas(w, h) { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; }
+function rgb(c, k = 1) { return `rgb(${clamp(c[0] * k | 0, 0, 255)},${clamp(c[1] * k | 0, 0, 255)},${clamp(c[2] * k | 0, 0, 255)})`; }
+function fmtTime(t) {
+  if (t == null || !isFinite(t)) return `-'--"--`;
+  const m = Math.floor(t / 60), s = Math.floor(t % 60), c = Math.floor((t * 100) % 100);
+  return `${m}'${String(s).padStart(2, '0')}"${String(c).padStart(2, '0')}`;
+}
+function store(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { } }
+function load(k, d) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch (e) { return d; } }
+function roundRect(c, x, y, w, h, r) {
+  c.beginPath(); c.moveTo(x + r, y); c.arcTo(x + w, y, x + w, y + h, r); c.arcTo(x + w, y + h, x, y + h, r);
+  c.arcTo(x, y + h, x, y, r); c.arcTo(x, y, x + w, y, r); c.closePath();
+}
+
+// ------------------------------------------------------------ constants
+const RW = 384, RH = 216;         // 内部渲染分辨率 (16:9)
+const TS = 2048;                  // 赛道贴图尺寸 (1 texel = 1 世界单位)
+const S_ROAD = 0, S_OFF = 1, S_WALL = 2, S_DEEP = 3;
+const NA = 24;                    // 精灵角度帧数
+const LAPS = 3;
+const STEP = 1 / 60;
+const CC_TABLE = { 50: { speed: 118, ai: 0.9 }, 100: { speed: 138, ai: 0.95 }, 150: { speed: 158, ai: 0.985 } };
+const POINTS = [10, 8, 6, 5, 4, 3, 2, 1];
+
+// ---------------------------------------------------------------- input
+const KEYS = new Set();
+const PREVENT = new Set(['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space', 'Slash', 'Tab', 'Backspace', 'Quote']);
+const BIND = {
+  solo: { left: ['ArrowLeft', 'KeyA'], right: ['ArrowRight', 'KeyD'], accel: ['ArrowUp', 'KeyW'], brake: ['ArrowDown', 'KeyS'], drift: ['Space', 'ShiftLeft', 'ShiftRight', 'KeyC'], item: ['KeyX', 'KeyE', 'KeyZ'] },
+  p1: { left: ['KeyA'], right: ['KeyD'], accel: ['KeyW'], brake: ['KeyS'], drift: ['KeyF', 'ShiftLeft', 'Space'], item: ['KeyG', 'KeyQ', 'KeyE'] },
+  p2: { left: ['ArrowLeft'], right: ['ArrowRight'], accel: ['ArrowUp'], brake: ['ArrowDown'], drift: ['Slash', 'ShiftRight', 'KeyL', 'Numpad0'], item: ['Period', 'KeyK', 'NumpadDecimal', 'Enter'] },
+};
+const MENU_MAP = { ArrowUp: 'up', KeyW: 'up', ArrowDown: 'down', KeyS: 'down', ArrowLeft: 'left', KeyA: 'left', ArrowRight: 'right', KeyD: 'right', Enter: 'ok', NumpadEnter: 'ok', Space: 'ok', KeyZ: 'ok', Escape: 'back', Backspace: 'back', KeyX: 'back' };
+const anyKey = list => list.some(c => KEYS.has(c));
+function getPads() {
+  const out = [];
+  if (!navigator.getGamepads) return out;
+  for (const p of navigator.getGamepads()) if (p && p.connected) out.push(p);
+  return out;
+}
+function readInput(pi, twoP) {
+  const b = twoP ? (pi === 0 ? BIND.p1 : BIND.p2) : BIND.solo;
+  let steer = (anyKey(b.right) ? 1 : 0) - (anyKey(b.left) ? 1 : 0);
+  let accel = anyKey(b.accel), brake = anyKey(b.brake), drift = anyKey(b.drift), item = anyKey(b.item);
+  const gp = getPads()[pi];
+  if (gp) {
+    const bt = i => gp.buttons[i] && gp.buttons[i].pressed;
+    const ax = gp.axes[0] || 0;
+    if (Math.abs(ax) > 0.2) steer = clamp(steer + (ax - Math.sign(ax) * 0.2) / 0.8, -1, 1);
+    if (bt(14)) steer = -1; if (bt(15)) steer = 1;
+    if (bt(0)) accel = true; if (bt(1)) brake = true;
+    if (bt(5) || bt(7)) drift = true;
+    if (bt(2) || bt(4) || bt(6)) item = true;
+  }
+  return { steer, accel, brake, drift, item };
+}
+
+// ---------------------------------------------------------------- audio
+const SND = {
+  ctx: null, master: null, sfxG: null, musG: null, noise: null, muted: load('spk_muted', false),
+  init() {
+    if (this.ctx) { if (this.ctx.state === 'suspended') this.ctx.resume(); return; }
+    const AC = window.AudioContext || window.webkitAudioContext; if (!AC) return;
+    try { this.ctx = new AC(); } catch (e) { return; }
+    const c = this.ctx;
+    this.master = c.createGain(); this.master.gain.value = this.muted ? 0 : 0.7; this.master.connect(c.destination);
+    this.sfxG = c.createGain(); this.sfxG.gain.value = 0.9; this.sfxG.connect(this.master);
+    this.musG = c.createGain(); this.musG.gain.value = 0.3; this.musG.connect(this.master);
+    const len = c.sampleRate, b = c.createBuffer(1, len, c.sampleRate), d = b.getChannelData(0);
+    for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+    this.noise = b;
+    if (MUSIC.want) MUSIC.play(MUSIC.want);
+  },
+  toggleMute() {
+    this.muted = !this.muted; store('spk_muted', this.muted);
+    if (this.master) this.master.gain.value = this.muted ? 0 : 0.7;
+  },
+  tone(f, dur, o = {}) {
+    const c = this.ctx; if (!c) return;
+    const t = o.at != null ? o.at : c.currentTime + (o.delay || 0);
+    const os = c.createOscillator(); os.type = o.type || 'square';
+    os.frequency.setValueAtTime(f, t);
+    if (o.to) os.frequency.exponentialRampToValueAtTime(Math.max(20, o.to), t + dur);
+    const g = c.createGain(), v = o.vol != null ? o.vol : 0.2;
+    g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(v, t + 0.006);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    os.connect(g); g.connect(o.dest || this.sfxG); os.start(t); os.stop(t + dur + 0.03);
+  },
+  nz(dur, o = {}) {
+    const c = this.ctx; if (!c) return;
+    const t = o.at != null ? o.at : c.currentTime + (o.delay || 0);
+    const s = c.createBufferSource(); s.buffer = this.noise; s.loop = true;
+    const fl = c.createBiquadFilter(); fl.type = o.ft || 'bandpass';
+    fl.frequency.setValueAtTime(o.f || 1500, t);
+    if (o.to) fl.frequency.exponentialRampToValueAtTime(o.to, t + dur);
+    fl.Q.value = o.q != null ? o.q : 1;
+    const g = c.createGain(); g.gain.setValueAtTime(o.vol != null ? o.vol : 0.2, t);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    s.connect(fl); fl.connect(g); g.connect(o.dest || this.sfxG);
+    s.start(t, Math.random() * 0.5); s.stop(t + dur + 0.03);
+  },
+  makeEngine() {
+    const c = this.ctx; if (!c) return null;
+    const o1 = c.createOscillator(); o1.type = 'sawtooth';
+    const o2 = c.createOscillator(); o2.type = 'square';
+    const fl = c.createBiquadFilter(); fl.type = 'lowpass'; fl.frequency.value = 700;
+    const g = c.createGain(); g.gain.value = 0;
+    o1.connect(fl); o2.connect(fl); fl.connect(g); g.connect(this.sfxG);
+    const n = c.createBufferSource(); n.buffer = this.noise; n.loop = true;
+    const bp = c.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 2600; bp.Q.value = 5;
+    const ng = c.createGain(); ng.gain.value = 0;
+    n.connect(bp); bp.connect(ng); ng.connect(this.sfxG);
+    o1.start(); o2.start(); n.start();
+    return {
+      update(ratio, drifting, boost, vol) {
+        const t = c.currentTime, base = 50 + ratio * 150 + (boost ? 40 : 0);
+        o1.frequency.setTargetAtTime(base, t, 0.06);
+        o2.frequency.setTargetAtTime(base * 1.5, t, 0.06);
+        fl.frequency.setTargetAtTime(500 + ratio * 900, t, 0.1);
+        g.gain.setTargetAtTime(vol * (0.035 + 0.045 * ratio), t, 0.08);
+        ng.gain.setTargetAtTime(drifting ? 0.045 * vol : 0, t, 0.05);
+      },
+      stop() { try { o1.stop(); o2.stop(); n.stop(); } catch (e) { } g.disconnect(); ng.disconnect(); }
+    };
+  }
+};
+const midi = m => 440 * Math.pow(2, (m - 69) / 12);
+function arp(notes, len, o = {}) { notes.forEach((m, i) => SND.tone(midi(m), len * 1.6, { ...o, delay: (o.delay || 0) + i * len })); }
+function sfx(name, vol = 1) {
+  if (!SND.ctx) return;
+  const T = SND.tone.bind(SND), Nz = SND.nz.bind(SND), v = vol;
+  switch (name) {
+    case 'move': T(660, 0.05, { vol: 0.1 * v }); break;
+    case 'select': T(880, 0.06, { vol: 0.12 * v }); T(1320, 0.1, { vol: 0.12 * v, delay: 0.05 }); break;
+    case 'back': T(440, 0.08, { vol: 0.12 * v, to: 300 }); break;
+    case 'count': T(midi(69), 0.3, { vol: 0.22 * v }); break;
+    case 'go': T(midi(81), 0.7, { vol: 0.22 * v }); break;
+    case 'box': T(700, 0.06, { vol: 0.12 * v, type: 'triangle', to: 1400 }); Nz(0.12, { f: 3000, vol: 0.08 * v }); break;
+    case 'roul': T(1100 + Math.random() * 500, 0.03, { vol: 0.05 * v }); break;
+    case 'get': T(988, 0.07, { vol: 0.14 * v }); T(1480, 0.14, { vol: 0.14 * v, delay: 0.07 }); break;
+    case 'shell': Nz(0.25, { f: 700, to: 3000, vol: 0.2 * v }); T(300, 0.2, { to: 900, vol: 0.08 * v, type: 'sawtooth' }); break;
+    case 'drop': T(260, 0.1, { vol: 0.12 * v, type: 'triangle', to: 180 }); break;
+    case 'hit': Nz(0.35, { f: 1400, to: 200, vol: 0.3 * v, ft: 'lowpass' }); T(700, 0.4, { to: 90, vol: 0.12 * v, type: 'sawtooth' }); break;
+    case 'spin': T(1000, 0.5, { to: 200, vol: 0.1 * v, type: 'triangle' }); break;
+    case 'coin': T(988, 0.07, { vol: 0.12 * v }); T(1319, 0.28, { vol: 0.12 * v, delay: 0.07 }); break;
+    case 'boost': Nz(0.6, { f: 400, to: 2800, vol: 0.2 * v }); T(180, 0.5, { to: 520, vol: 0.08 * v, type: 'sawtooth' }); break;
+    case 'mini1': T(1600, 0.05, { vol: 0.07 * v, type: 'sine' }); break;
+    case 'mini2': T(2200, 0.06, { vol: 0.08 * v, type: 'sine' }); break;
+    case 'bump': T(130, 0.14, { to: 60, vol: 0.22 * v }); Nz(0.08, { f: 500, vol: 0.15 * v, ft: 'lowpass' }); break;
+    case 'hop': T(330, 0.07, { to: 520, vol: 0.06 * v }); break;
+    case 'fall': T(900, 0.8, { to: 120, vol: 0.14 * v, type: 'triangle' }); break;
+    case 'splash': Nz(0.5, { f: 3000, to: 300, vol: 0.2 * v, ft: 'lowpass' }); break;
+    case 'lap': arp([72, 76, 79, 84], 0.07, { vol: 0.12 * v }); break;
+    case 'final': arp([67, 71, 74, 79, 83, 86], 0.08, { vol: 0.13 * v }); break;
+    case 'finish': arp([72, 72, 72, 76, 79, 84, 79, 84], 0.11, { vol: 0.14 * v }); break;
+    case 'star': arp([72, 76, 79, 84, 88, 91], 0.05, { vol: 0.1 * v, type: 'triangle' }); break;
+    case 'lightning': Nz(0.8, { f: 5000, to: 100, vol: 0.35 * v, ft: 'lowpass' }); T(1600, 0.6, { to: 50, vol: 0.15 * v, type: 'sawtooth' }); break;
+    case 'squish': T(220, 0.2, { to: 70, vol: 0.14 * v }); break;
+    case 'respawn': arp([79, 76, 72], 0.06, { vol: 0.08 * v, type: 'triangle' }); break;
+    case 'wrong': T(220, 0.15, { vol: 0.08 * v }); break;
+  }
+}
+
+// ---------------------------------------------------------------- music
+// 原创芯片音乐：lead 为 [MIDI 音高, 八分音符长度]，roots 为每小节贝斯根音
+const SONGS = {
+  menu: { bpm: 112, roots: [43, 48, 43, 50, 45, 50, 43, 43], lead: [[67, 2], [71, 2], [74, 2], [71, 2], [72, 2], [76, 2], [74, 4], [71, 1], [72, 1], [74, 2], [79, 2], [78, 2], [76, 2], [74, 2], [72, 2], [71, 2], [69, 2], [72, 2], [76, 2], [74, 2], [72, 2], [71, 2], [69, 4], [67, 1], [69, 1], [71, 2], [72, 2], [74, 2], [71, 4], [67, 4]] },
+  sunny: { bpm: 150, roots: [48, 53, 48, 43, 48, 53, 43, 48], lead: [[76, 1], [79, 1], [84, 2], [83, 1], [79, 1], [76, 2], [77, 1], [81, 1], [84, 1], [81, 1], [79, 4], [76, 1], [79, 1], [84, 1], [86, 2], [84, 1], [83, 1], [81, 1], [79, 2], [76, 2], [74, 2], [0, 2], [72, 1], [76, 1], [79, 1], [84, 1], [83, 2], [79, 2], [81, 1], [79, 1], [77, 1], [76, 1], [74, 4], [77, 1], [81, 1], [84, 1], [86, 1], [88, 2], [86, 1], [84, 1], [83, 2], [86, 2], [84, 4]] },
+  ghost: { bpm: 128, roots: [45, 45, 40, 45, 45, 45, 50, 40], lead: [[69, 2], [72, 1], [76, 1], [75, 2], [72, 2], [71, 1], [72, 1], [71, 1], [68, 1], [69, 4], [69, 1], [72, 1], [76, 1], [81, 1], [80, 2], [76, 2], [77, 1], [76, 1], [74, 1], [71, 1], [72, 2], [71, 2], [76, 2], [77, 1], [76, 1], [75, 2], [76, 2], [72, 1], [71, 1], [69, 1], [68, 1], [69, 4], [65, 1], [69, 1], [72, 1], [77, 1], [76, 2], [74, 2], [71, 2], [68, 2], [69, 4]] },
+  castle: { bpm: 160, roots: [38, 38, 46, 45, 38, 38, 46, 45], lead: [[62, 1], [62, 1], [65, 1], [62, 1], [67, 1], [62, 1], [68, 1], [67, 1], [65, 1], [62, 1], [65, 1], [67, 1], [69, 4], [74, 1], [72, 1], [69, 1], [67, 1], [69, 1], [65, 1], [67, 1], [64, 1], [62, 2], [0, 2], [61, 2], [64, 2], [62, 1], [62, 1], [65, 1], [62, 1], [67, 1], [62, 1], [68, 1], [67, 1], [65, 1], [62, 1], [65, 1], [67, 1], [70, 4], [70, 1], [69, 1], [67, 1], [65, 1], [67, 2], [69, 2], [74, 2], [73, 2], [74, 4]] },
+};
+const MUSIC = {
+  cur: null, want: null, step: 0, next: 0, timer: null, tempo: 1, paused: false,
+  play(name) {
+    this.stop(); this.want = name; this.paused = false;
+    if (!SND.ctx) return;
+    const s = SONGS[name]; if (!s) return;
+    if (!s._lead) { s._lead = []; for (const [n, l] of s.lead) { s._lead.push([n, l]); for (let i = 1; i < l; i++) s._lead.push(null); } }
+    this.cur = s; this.tempo = 1; this.step = 0; this.next = SND.ctx.currentTime + 0.1;
+    this.timer = setInterval(() => this.tick(), 30);
+  },
+  stop() { if (this.timer) clearInterval(this.timer); this.timer = null; this.cur = null; this.want = null; },
+  tick() {
+    const c = SND.ctx; if (!c || !this.cur || this.paused) return;
+    const spb = 60 / (this.cur.bpm * this.tempo) / 2;
+    if (this.next < c.currentTime - 0.2) this.next = c.currentTime + 0.02;
+    while (this.next < c.currentTime + 0.15) { this.sched(this.step, this.next, spb); this.next += spb; this.step++; }
+  },
+  sched(step, t, spb) {
+    const s = this.cur, L = s._lead, e = L[step % L.length], D = SND.musG;
+    if (e && e[0] > 0) {
+      SND.tone(midi(e[0]), e[1] * spb * 0.95, { at: t, vol: 0.12, dest: D });
+      SND.tone(midi(e[0]) * 1.005, e[1] * spb * 0.9, { at: t, vol: 0.04, dest: D, type: 'triangle' });
+    }
+    const r = s.roots[Math.floor(step / 8) % s.roots.length], pat = [0, 12, 7, 12, 0, 12, 7, 12];
+    SND.tone(midi(r + pat[step % 8]), spb * 0.9, { at: t, vol: 0.2, dest: D, type: 'triangle' });
+    if (step % 4 === 0) SND.tone(140, 0.12, { at: t, to: 45, vol: 0.28, dest: D, type: 'sine' });
+    if (step % 8 === 4) SND.nz(0.12, { at: t, f: 1800, vol: 0.14, dest: D });
+    if (step % 2 === 1) SND.nz(0.04, { at: t, f: 8000, ft: 'highpass', vol: 0.05, dest: D });
+  }
+};
+
+// ----------------------------------------------------------- characters
+// 原创角色（非任天堂角色），stats: speed 极速 / accel 加速 / handling 操控 / weight 重量
+const CHARS = [
+  { id: 'rocco', name: '洛可', en: 'ROCCO', desc: '均衡型', head: 'cap', kart: [225, 40, 40], shirt: [45, 80, 210], hat: [225, 35, 35], skin: [250, 200, 160], hair: [90, 50, 20], stats: { speed: 1.0, accel: 1.0, handling: 1.0, weight: 1.0 } },
+  { id: 'mia', name: '米娅', en: 'MIA', desc: '轻量·加速型', head: 'long', kart: [250, 120, 190], shirt: [255, 175, 215], hat: [255, 215, 40], skin: [252, 210, 175], hair: [250, 120, 175], stats: { speed: 0.95, accel: 1.25, handling: 1.06, weight: 0.75 } },
+  { id: 'dino', name: '迪诺', en: 'DINO', desc: '灵活·操控型', head: 'dino', kart: [55, 185, 70], shirt: [245, 240, 225], hat: [240, 90, 40], skin: [95, 205, 85], hair: [240, 90, 40], stats: { speed: 1.0, accel: 0.95, handling: 1.16, weight: 0.95 } },
+  { id: 'brutus', name: '布鲁图', en: 'BRUTUS', desc: '重量·极速型', head: 'spiky', kart: [60, 60, 72], shirt: [240, 190, 40], hat: [240, 240, 240], skin: [225, 165, 105], hair: [235, 110, 30], stats: { speed: 1.06, accel: 0.8, handling: 0.88, weight: 1.4 } },
+];
+// 仅由电脑驾驶的换色车手，用来凑满 8 人
+const AI_ONLY = [
+  { ...CHARS[0], id: 'bluco', name: '蓝可', en: 'BLUCO', kart: [40, 110, 230], shirt: [240, 240, 240], hat: [40, 110, 230] },
+  { ...CHARS[1], id: 'lila', name: '莉拉', en: 'LILA', kart: [150, 80, 220], shirt: [190, 150, 250], hair: [120, 70, 200] },
+  { ...CHARS[2], id: 'rex', name: '雷克斯', en: 'REX', kart: [240, 170, 30], skin: [240, 170, 60], hair: [150, 60, 200] },
+  { ...CHARS[3], id: 'grunt', name: '格朗特', en: 'GRUNT', kart: [235, 235, 240], shirt: [60, 160, 90], skin: [150, 200, 120], hair: [40, 40, 40] },
+];
+
+function buildVoxels(ch) {
+  const map = new Map();
+  const K = (x, y, z) => (x + 32) | ((y + 32) << 6) | ((z + 8) << 12);
+  const set = (x, y, z, c) => map.set(K(x, y, z), { x, y, z, c });
+  const box = (x0, x1, y0, y1, z0, z1, c) => { for (let x = x0; x <= x1; x++) for (let y = y0; y <= y1; y++) for (let z = z0; z <= z1; z++) set(x, y, z, c); };
+  const ell = (cx, cy, cz, rx, ry, rz, c) => {
+    for (let x = Math.floor(cx - rx); x <= Math.ceil(cx + rx); x++)
+      for (let y = Math.floor(cy - ry); y <= Math.ceil(cy + ry); y++)
+        for (let z = Math.floor(cz - rz); z <= Math.ceil(cz + rz); z++) {
+          const d = ((x - cx) / rx) ** 2 + ((y - cy) / ry) ** 2 + ((z - cz) / rz) ** 2;
+          if (d <= 1) set(x, y, z, typeof c === 'function' ? c(x, y, z) : c);
+        }
+  };
+  const kc = ch.kart, kd = kc.map(v => v * 0.62), BLK = [34, 34, 40], GRY = [165, 165, 175], DG = [80, 80, 92], WHT = [242, 242, 242], EYE = [20, 20, 50];
+  // 轮子
+  box(-7, -5, -9, -5, 0, 4, BLK); box(5, 7, -9, -5, 0, 4, BLK);
+  box(-6, -5, 4, 7, 0, 3, BLK); box(5, 6, 4, 7, 0, 3, BLK);
+  set(-7, -7, 2, GRY); set(7, -7, 2, GRY); set(-6, 5, 2, GRY); set(6, 5, 2, GRY);
+  // 车身
+  box(-4, 4, -9, 8, 1, 2, kc);
+  box(-5, -5, -4, 3, 1, 3, kd); box(5, 5, -4, 3, 1, 3, kd);
+  box(-3, 3, 2, 8, 3, 3, kc); box(-2, 2, 5, 9, 4, 4, kc);
+  box(-5, 5, 9, 9, 1, 2, DG);
+  box(-3, 3, -7, -6, 3, 8, DG);
+  box(-3, 3, -11, -8, 2, 5, GRY);
+  box(-2, -2, -12, -12, 4, 5, DG); box(2, 2, -12, -12, 4, 5, DG);
+  box(-2, 2, 3, 3, 6, 7, BLK);
+  // 车手
+  const big = ch.head === 'spiky';
+  ell(0, -3, 7.5, big ? 4 : 3.2, big ? 2.8 : 2.3, big ? 3.4 : 3, ch.shirt);
+  box(-3, -3, -2, 2, 6, 6, ch.shirt); box(3, 3, -2, 2, 6, 6, ch.shirt);
+  set(-2, 3, 7, WHT); set(2, 3, 7, WHT);
+  const skin = ch.skin, hat = ch.hat, hair = ch.hair;
+  if (ch.head === 'cap') {
+    ell(0, -2, 12.5, 3.3, 3.2, 3.2, (x, y, z) => z >= 13.5 ? hat : (y <= -4 && z >= 10 ? hair : skin));
+    box(-3, 3, 1, 3, 13, 13, hat);
+    set(0, 1, 14, WHT);
+    set(-1, 2, 12, EYE); set(1, 2, 12, EYE); set(0, 2, 11, [255, 165, 135]);
+    box(-2, 2, 2, 2, 10, 10, hair);
+  } else if (ch.head === 'long') {
+    ell(0, -2, 12.5, 3.3, 3.2, 3.2, (x, y, z) => (z >= 13.5 || y <= -3 || (Math.abs(x) >= 3 && z >= 11)) ? hair : skin);
+    box(-3, 3, -6, -5, 6, 12, hair);
+    box(-1, 1, -2, 0, 16, 16, hat); set(0, -1, 17, hat); set(-1, -1, 17, hat); set(1, -1, 17, hat);
+    set(-1, 2, 12, EYE); set(1, 2, 12, EYE); set(0, 2, 10, [230, 80, 110]);
+  } else if (ch.head === 'dino') {
+    ell(0, -2, 12, 3.2, 3, 3.2, skin);
+    ell(0, 1.5, 11, 2.6, 2.6, 2.2, skin);
+    box(-2, 2, 3, 4, 9, 9, [250, 240, 220]);
+    set(-1, 4, 12, [30, 90, 30]); set(1, 4, 12, [30, 90, 30]);
+    set(-2, 0, 14, WHT); set(2, 0, 14, WHT); set(-2, 1, 14, EYE); set(2, 1, 14, EYE);
+    set(0, -2, 16, hair); set(0, -4, 15, hair); set(0, -5, 13, hair); set(0, -6, 10, hair); set(0, -6, 8, hair);
+  } else {
+    ell(0, -2, 12.5, 3.7, 3.4, 3.4, skin);
+    box(-3, 3, -4, 1, 15, 15, hair);
+    for (const [x, y, h] of [[-2, -3, 17], [0, -4, 18], [2, -3, 17], [-1, -1, 17], [1, -1, 17], [0, -2, 18], [-3, -1, 16], [3, -1, 16]]) box(x, x, y, y, 15, h, hair);
+    box(-2, 2, 1, 2, 9, 10, hair);
+    set(-1, 2, 13, EYE); set(1, 2, 13, EYE); box(-2, -1, 2, 2, 14, 14, hair); box(1, 2, 2, 2, 14, 14, hair);
+    set(-4, -1, 14, hat); set(-5, -1, 15, hat); set(4, -1, 14, hat); set(5, -1, 15, hat);
+  }
+  // 只保留表面体素并着色
+  const out = [], N6 = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]];
+  for (const v of map.values()) {
+    let exposed = false;
+    for (const [dx, dy, dz] of N6) if (!map.has(K(v.x + dx, v.y + dy, v.z + dz))) { exposed = true; break; }
+    if (!exposed) continue;
+    const top = !map.has(K(v.x, v.y, v.z + 1));
+    const k = (0.72 + 0.28 * clamp(v.z / 16, 0, 1)) * (top ? 1.12 : 1) * (!map.has(K(v.x + 1, v.y, v.z)) ? 0.88 : 1);
+    out.push({ x: v.x, y: v.y, z: v.z, col: rgb(v.c, k) });
+  }
+  return out;
+}
+const SPR_SIZE = 64, SPR_PPU = 2, SPR_AX = 32, SPR_AY = 46, SPR_UNITS = SPR_SIZE / SPR_PPU;
+function renderVoxelFrames(vox) {
+  const el = 0.5, ce = Math.cos(el), se = Math.sin(el), frames = [];
+  for (let f = 0; f < NA; f++) {
+    const a = f / NA * TAU, ca = Math.cos(a), sa = Math.sin(a);
+    const pts = vox.map(v => {
+      const R = v.x * ca + v.y * sa, F = -v.x * sa + v.y * ca;
+      return { sx: Math.round(SPR_AX + R * SPR_PPU), sy: Math.round(SPR_AY - (F * se + v.z * ce) * SPR_PPU), d: F * ce - v.z * se, c: v.col };
+    });
+    pts.sort((p, q) => q.d - p.d);
+    const cv = mkCanvas(SPR_SIZE, SPR_SIZE), c = cv.getContext('2d');
+    c.fillStyle = '#0b0b14';
+    for (const p of pts) c.fillRect(p.sx - 2, p.sy - 2, 5, 5);
+    for (const p of pts) { c.fillStyle = p.c; c.fillRect(p.sx - 1, p.sy - 1, 3, 3); }
+    frames.push(cv);
+  }
+  return frames;
+}
+
+// ------------------------------------------------------------ 2D sprites
+function spr(w, h, fn) { const c = mkCanvas(w, h), x = c.getContext('2d'); fn(x, w, h); return c; }
+const SPR = {};
+function buildSprites() {
+  SPR.box = [];
+  for (let f = 0; f < 8; f++) SPR.box.push(spr(32, 32, c => {
+    const g = c.createLinearGradient(0, 0, 32, 32);
+    g.addColorStop(0, `hsl(${f * 45},95%,72%)`); g.addColorStop(1, `hsl(${f * 45 + 140},95%,55%)`);
+    roundRect(c, 3, 3, 26, 26, 5); c.globalAlpha = 0.88; c.fillStyle = g; c.fill(); c.globalAlpha = 1;
+    c.lineWidth = 2; c.strokeStyle = '#fff'; c.stroke();
+    c.fillStyle = 'rgba(255,255,255,.45)'; c.fillRect(6, 6, 8, 4);
+    c.font = 'bold 20px sans-serif'; c.textAlign = 'center'; c.textBaseline = 'middle';
+    c.lineWidth = 4; c.strokeStyle = '#333'; c.strokeText('?', 16, 17); c.fillStyle = '#fff'; c.fillText('?', 16, 17);
+  }));
+  SPR.banana = spr(24, 24, c => {
+    c.lineCap = 'round';
+    c.strokeStyle = '#3a2a00'; c.lineWidth = 8; c.beginPath(); c.arc(12, 3, 13, 0.6, 2.55); c.stroke();
+    c.strokeStyle = '#ffe135'; c.lineWidth = 5; c.beginPath(); c.arc(12, 3, 13, 0.6, 2.55); c.stroke();
+    c.strokeStyle = '#fff6a8'; c.lineWidth = 1.5; c.beginPath(); c.arc(12, 3, 11.5, 1.1, 2.0); c.stroke();
+    c.fillStyle = '#5a3a10'; c.fillRect(20, 11, 3, 3); c.fillRect(1, 11, 3, 3);
+  });
+  const shell = (col, hi) => spr(24, 24, c => {
+    c.fillStyle = '#111'; c.beginPath(); c.ellipse(12, 13, 11.5, 10, 0, 0, TAU); c.fill();
+    c.fillStyle = '#f4f4f4'; c.beginPath(); c.ellipse(12, 15, 10, 7, 0, 0, TAU); c.fill();
+    c.fillStyle = col; c.beginPath(); c.ellipse(12, 11.5, 9.5, 8, 0, 0, TAU); c.fill();
+    c.fillStyle = hi;
+    for (const [x, y] of [[12, 7], [7, 11], [17, 11], [12, 14]]) { c.beginPath(); c.arc(x, y, 2.2, 0, TAU); c.fill(); }
+    c.fillStyle = '#fff'; c.fillRect(7, 6, 3, 2);
+  });
+  SPR.green = shell('#1e9e3a', '#7fe08a'); SPR.red = shell('#d62020', '#ff8a8a');
+  SPR.mushroom = spr(24, 24, c => {
+    c.fillStyle = '#111'; roundRect(c, 6, 11, 12, 12, 3); c.fill();
+    c.fillStyle = '#f5e6c8'; roundRect(c, 7, 12, 10, 10, 2); c.fill();
+    c.fillStyle = '#111'; c.fillRect(9, 14, 2, 4); c.fillRect(13, 14, 2, 4);
+    c.fillStyle = '#111'; c.beginPath(); c.ellipse(12, 12, 12, 11, 0, Math.PI, TAU); c.fill(); c.fillRect(0, 11, 24, 3);
+    c.fillStyle = '#e02525'; c.beginPath(); c.ellipse(12, 12, 10.5, 9.5, 0, Math.PI, TAU); c.fill(); c.fillRect(1.5, 11, 21, 1.8);
+    c.fillStyle = '#fff'; c.beginPath(); c.arc(12, 6, 3, 0, TAU); c.fill(); c.beginPath(); c.arc(4.5, 10, 2.2, 0, TAU); c.fill(); c.beginPath(); c.arc(19.5, 10, 2.2, 0, TAU); c.fill();
+  });
+  SPR.triple = spr(24, 24, c => { c.drawImage(SPR.mushroom, 0, 9, 14, 14); c.drawImage(SPR.mushroom, 10, 9, 14, 14); c.drawImage(SPR.mushroom, 5, 0, 14, 14); });
+  SPR.double = spr(24, 24, c => { c.drawImage(SPR.mushroom, 0, 5, 15, 15); c.drawImage(SPR.mushroom, 9, 5, 15, 15); });
+  SPR.star = spr(24, 24, c => {
+    c.beginPath();
+    for (let i = 0; i < 10; i++) { const a = -Math.PI / 2 + i * Math.PI / 5, r = i % 2 ? 5 : 11.5; c.lineTo(12 + Math.cos(a) * r, 12.5 + Math.sin(a) * r); }
+    c.closePath(); c.fillStyle = '#ffd400'; c.fill(); c.lineWidth = 2; c.strokeStyle = '#b36b00'; c.stroke();
+    c.fillStyle = '#222'; c.fillRect(9, 10, 2, 4); c.fillRect(13, 10, 2, 4);
+  });
+  SPR.lightning = spr(24, 24, c => {
+    c.beginPath(); c.moveTo(14, 1); c.lineTo(5, 13); c.lineTo(11, 13); c.lineTo(8, 23); c.lineTo(19, 9); c.lineTo(13, 9); c.lineTo(17, 1); c.closePath();
+    c.fillStyle = '#ffe94a'; c.fill(); c.lineWidth = 2; c.strokeStyle = '#a36a00'; c.stroke();
+  });
+  SPR.coin = [10, 7, 2, 7].map(wd => spr(24, 24, c => {
+    c.fillStyle = '#7a4a00'; c.beginPath(); c.ellipse(12, 12, wd + 1.5, 11, 0, 0, TAU); c.fill();
+    c.fillStyle = '#ffc61a'; c.beginPath(); c.ellipse(12, 12, wd, 9.5, 0, 0, TAU); c.fill();
+    if (wd > 4) { c.fillStyle = '#ffe98a'; c.fillRect(12 - wd * 0.2, 6, Math.max(1, wd * 0.4), 12); }
+  }));
+  SPR.pipe = spr(32, 44, c => {
+    const g = c.createLinearGradient(5, 0, 27, 0); g.addColorStop(0, '#0b5e1c'); g.addColorStop(0.35, '#4fe06a'); g.addColorStop(1, '#0b4a16');
+    c.fillStyle = '#062'; c.fillRect(5, 12, 22, 32); c.fillStyle = g; c.fillRect(6, 12, 20, 32);
+    c.fillStyle = '#031'; c.fillRect(2, 3, 28, 12); c.fillStyle = g; c.fillRect(3, 4, 26, 10);
+    c.fillStyle = '#021'; c.beginPath(); c.ellipse(16, 6, 11, 2.5, 0, 0, TAU); c.fill();
+  });
+  SPR.tree = spr(40, 56, c => {
+    c.fillStyle = '#4a2a10'; c.fillRect(17, 34, 7, 22); c.fillStyle = '#6b3d18'; c.fillRect(18, 34, 3, 22);
+    const blob = (x, y, r, col) => { c.fillStyle = col; c.beginPath(); c.arc(x, y, r, 0, TAU); c.fill(); };
+    blob(20, 24, 17, '#0d3d12'); blob(12, 26, 10, '#0d3d12'); blob(28, 26, 10, '#0d3d12');
+    blob(20, 22, 15, '#1f7a26'); blob(13, 25, 8.5, '#1f7a26'); blob(27, 25, 8.5, '#1f7a26');
+    blob(16, 16, 7, '#3eaa3a'); blob(24, 20, 5, '#3eaa3a'); blob(14, 14, 3, '#7fd66b');
+  });
+  SPR.ghost = spr(28, 28, c => {
+    c.fillStyle = 'rgba(245,245,255,.9)'; c.beginPath(); c.arc(14, 12, 10, Math.PI, 0);
+    c.lineTo(24, 24); for (let i = 0; i < 4; i++) c.quadraticCurveTo(21.5 - i * 5, 20, 19 - i * 5, 24); c.closePath(); c.fill();
+    c.fillStyle = '#222'; c.fillRect(9, 9, 3, 5); c.fillRect(16, 9, 3, 5); c.fillStyle = '#e05a8a'; c.fillRect(12, 16, 4, 3);
+  });
+  SPR.pillar = spr(28, 52, c => {
+    c.fillStyle = '#2a2628'; c.fillRect(3, 6, 22, 46);
+    for (let y = 8; y < 52; y += 8) for (let x = ((y / 8) & 1) ? 4 : 10; x < 25; x += 12) { c.fillStyle = '#76707a'; c.fillRect(x, y, 10, 6); c.fillStyle = '#948d96'; c.fillRect(x, y, 10, 2); }
+    c.fillStyle = '#1a1618'; c.fillRect(0, 0, 28, 8); c.fillStyle = '#8a848c'; c.fillRect(1, 1, 26, 5);
+    c.fillStyle = '#ff7a1a'; c.fillRect(11, 1, 6, 3);
+  });
+  SPR.post = spr(16, 40, c => {
+    c.fillStyle = '#2a160a'; c.fillRect(5, 10, 6, 30); c.fillStyle = '#5a3218'; c.fillRect(6, 10, 3, 30);
+    c.fillStyle = 'rgba(255,200,80,.35)'; c.beginPath(); c.arc(8, 7, 7.5, 0, TAU); c.fill();
+    c.fillStyle = '#ffcf5a'; c.fillRect(5, 3, 6, 7); c.fillStyle = '#fff3c0'; c.fillRect(6, 4, 3, 3);
+  });
+  SPR.cloud = spr(44, 34, c => {
+    const blob = (x, y, r) => { c.beginPath(); c.arc(x, y, r, 0, TAU); c.fill(); };
+    c.fillStyle = '#333'; blob(12, 20, 11); blob(22, 14, 13); blob(32, 20, 11); blob(22, 23, 11);
+    c.fillStyle = '#fff'; blob(12, 20, 10); blob(22, 14, 12); blob(32, 20, 10); blob(22, 23, 10);
+    c.fillStyle = '#ffe07a'; c.fillRect(14, 6, 16, 5); c.fillStyle = '#6ad'; c.fillRect(15, 7, 6, 3); c.fillRect(23, 7, 6, 3);
+    c.fillStyle = '#222'; c.fillRect(17, 14, 3, 4); c.fillRect(25, 14, 3, 4); c.fillRect(19, 21, 7, 2);
+  });
+  SPR.flag = spr(24, 24, c => {
+    c.fillStyle = '#ddd'; c.fillRect(3, 2, 2, 21);
+    for (let y = 0; y < 4; y++) for (let x = 0; x < 5; x++) { c.fillStyle = (x + y) & 1 ? '#111' : '#fff'; c.fillRect(5 + x * 3.4, 3 + y * 3, 3.4, 3); }
+  });
+  SPR.spark = spr(8, 8, c => { c.fillStyle = '#fff'; c.fillRect(3, 0, 2, 8); c.fillRect(0, 3, 8, 2); });
+}
+const ITEM_KEYS = ['banana', 'green', 'red', 'mushroom', 'triple', 'star', 'lightning', 'coin'];
+function itemIcon(k) {
+  if (k.item === 'triple') return k.itemCount >= 3 ? SPR.triple : k.itemCount === 2 ? SPR.double : SPR.mushroom;
+  return k.item === 'coin' ? SPR.coin[0] : SPR[k.item];
+}
+
+// ------------------------------------------------------ background strips
+function buildBG(theme) {
+  const W = 1024, H = 80, cv = mkCanvas(W, H), c = cv.getContext('2d'), r = mkRng(theme.length * 977);
+  const hill = (base, fs, col) => {
+    c.fillStyle = col; c.beginPath(); c.moveTo(0, H);
+    for (let x = 0; x <= W; x += 2) { let y = base; for (const [k, a, p] of fs) y -= a * Math.sin(x / W * TAU * k + p); c.lineTo(x, y); }
+    c.lineTo(W, H); c.closePath(); c.fill();
+  };
+  const wrapDraw = (x, fn) => { fn(x); fn(x - W); fn(x + W); };
+  if (theme === 'grass') {
+    c.fillStyle = '#fff';
+    for (let i = 0; i < 9; i++) {
+      const x = i * 114 + r() * 60, y = 10 + r() * 16;
+      wrapDraw(x, xx => { c.fillStyle = '#d8ecff'; c.beginPath(); c.ellipse(xx, y + 3, 26, 7, 0, 0, TAU); c.fill(); c.fillStyle = '#fff'; c.beginPath(); c.ellipse(xx - 10, y, 12, 7, 0, 0, TAU); c.ellipse(xx + 6, y - 3, 14, 9, 0, 0, TAU); c.ellipse(xx + 18, y + 1, 10, 6, 0, 0, TAU); c.fill(); });
+    }
+    hill(H - 26, [[3, 12, 0.3], [7, 6, 1.2], [13, 3, 2.1]], '#5f86c0');
+    c.fillStyle = '#f2f7ff';
+    for (let x = 0; x < W; x += 2) { let y = H - 26; for (const [k, a, p] of [[3, 12, 0.3], [7, 6, 1.2], [13, 3, 2.1]]) y -= a * Math.sin(x / W * TAU * k + p); if (y < H - 38) c.fillRect(x, y, 2, (H - 38 - y) * 0.6 + 1); }
+    hill(H - 10, [[5, 6, 0.8], [11, 4, 0.1], [23, 2, 1.7]], '#2e8a36');
+    hill(H - 5, [[9, 3, 0.4], [31, 1.5, 0.2]], '#1f6a28');
+    for (let i = 0; i < 70; i++) { const x = r() * W; c.fillStyle = '#15501d'; c.beginPath(); c.arc(x, H - 3 - r() * 4, 3 + r() * 3, 0, TAU); c.fill(); }
+  } else if (theme === 'ghost') {
+    c.fillStyle = 'rgba(255,250,210,.25)'; c.beginPath(); c.arc(700, 20, 16, 0, TAU); c.fill();
+    c.fillStyle = '#fff5c8'; c.beginPath(); c.arc(700, 20, 11, 0, TAU); c.fill();
+    c.fillStyle = '#e6dcae'; c.beginPath(); c.arc(697, 17, 2.5, 0, TAU); c.arc(704, 24, 2, 0, TAU); c.fill();
+    for (let i = 0; i < 40; i++) { c.fillStyle = `rgba(255,255,255,${0.3 + r() * 0.5})`; c.fillRect(r() * W, r() * 40, 1, 1); }
+    hill(H - 20, [[2, 10, 0.5], [5, 7, 2], [11, 3, 1]], '#2b2150');
+    hill(H - 8, [[4, 5, 1.5], [9, 3, 0.2]], '#17112d');
+    c.strokeStyle = '#0a0716'; c.lineCap = 'round';
+    for (let i = 0; i < 26; i++) {
+      const x = r() * W, h = 14 + r() * 22;
+      wrapDraw(x, xx => {
+        c.lineWidth = 3; c.beginPath(); c.moveTo(xx, H); c.lineTo(xx, H - h); c.stroke();
+        c.lineWidth = 1.5; c.beginPath(); c.moveTo(xx, H - h * 0.6); c.lineTo(xx - 7, H - h * 0.85); c.moveTo(xx, H - h * 0.75); c.lineTo(xx + 6, H - h - 3); c.stroke();
+      });
+    }
+  } else {
+    hill(H - 24, [[2, 14, 1], [5, 6, 0.3], [9, 3, 2]], '#3b100a');
+    const vx = 300;
+    c.fillStyle = '#2a0a06'; c.beginPath(); c.moveTo(vx - 90, H); c.lineTo(vx - 14, H - 58); c.lineTo(vx + 14, H - 58); c.lineTo(vx + 90, H); c.fill();
+    const lg = c.createLinearGradient(0, H - 60, 0, H - 30); lg.addColorStop(0, '#ffb020'); lg.addColorStop(1, 'rgba(255,60,0,0)');
+    c.fillStyle = lg; c.fillRect(vx - 12, H - 60, 24, 30);
+    for (let i = 0; i < 20; i++) { c.fillStyle = `rgba(255,${100 + r() * 100 | 0},0,.8)`; c.fillRect(vx - 20 + r() * 40, H - 58 - r() * 20, 2, 2); }
+    c.fillStyle = '#1a0c0c';
+    for (let x = 0; x < W; x += 64) {
+      const h = 22 + ((x * 7) % 3) * 6;
+      c.fillRect(x, H - h, 64, h);
+      for (let k = 0; k < 64; k += 10) c.fillRect(x + k, H - h - 5, 6, 5);
+      if ((x / 64) % 3 === 1) { c.fillRect(x + 20, H - h - 22, 22, 22); for (let k = 0; k < 22; k += 8) c.fillRect(x + 20 + k, H - h - 27, 5, 5); c.fillStyle = '#ffae3a'; c.fillRect(x + 28, H - h - 15, 5, 7); c.fillStyle = '#1a0c0c'; }
+      c.fillStyle = '#ff9a2a'; c.fillRect(x + 12, H - h + 8, 3, 4); c.fillRect(x + 44, H - h + 8, 3, 4); c.fillStyle = '#1a0c0c';
+    }
+    const g = c.createLinearGradient(0, H - 12, 0, H); g.addColorStop(0, 'rgba(255,80,0,0)'); g.addColorStop(1, 'rgba(255,90,0,.55)');
+    c.fillStyle = g; c.fillRect(0, H - 12, W, 12);
+  }
+  const data = new Uint32Array(c.getImageData(0, 0, W, H).data.buffer);
+  return { data, W, H };
+}
+
+// --------------------------------------------------------------- tracks
+function tileCanvas(fn, seed) {
+  const size = 64, cv = mkCanvas(size, size), c = cv.getContext('2d'), img = c.createImageData(size, size), d = img.data, r = mkRng(seed);
+  for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
+    const [R, G, B] = fn(x, y, r), i = (y * size + x) * 4;
+    d[i] = clamp(R, 0, 255); d[i + 1] = clamp(G, 0, 255); d[i + 2] = clamp(B, 0, 255); d[i + 3] = 255;
+  }
+  c.putImageData(img, 0, 0); return cv;
+}
+const TILES = {
+  grass: (x, y, r) => { const chk = ((x >> 4) + (y >> 4)) & 1, n = r() * 14 - 7; return chk ? [62 + n, 166 + n, 54 + n] : [78 + n, 184 + n, 66 + n]; },
+  asphalt: (x, y, r) => { const n = r() * 18 - 9, s = r() < 0.04 ? -22 : 0, v = 116 + n + s; return [v, v, v + 8]; },
+  hedge: (x, y, r) => { const n = r(), v = n < 0.3 ? 28 : n < 0.8 ? 46 : 70; return [v * 0.45, v + 42, v * 0.4]; },
+  water: (x, y, r) => { const w = Math.sin((x + y * 0.5) / 64 * TAU * 2) * 0.5 + Math.sin((x - y) / 64 * TAU * 3) * 0.5, n = r() * 8, hi = w > 0.82 ? 38 : 0; return [18 + n + hi * 0.6, 34 + n + hi, 64 + n + hi * 1.2]; },
+  planks: (x, y, r) => { const row = y >> 3, off = (row * 23) & 63, gap = (y & 7) === 7 || ((x + off) & 31) === 0, n = r() * 16, t = (row * 37 % 5) * 6; return gap ? [48, 28, 16] : [138 + n + t, 90 + n * 0.7 + t * 0.7, 50 + n * 0.4]; },
+  rail: (x, y, r) => { const n = r() * 14; return ((x + y) & 15) < 2 ? [60, 30, 18] : [112 + n, 62 + n * 0.6, 36]; },
+  stone: (x, y, r) => { const g = (x & 31) === 0 || (y & 31) === 0, n = r() * 14, t = ((x >> 5) + (y >> 5)) & 1 ? 9 : 0; return g ? [70, 64, 64] : [146 + n + t, 142 + n + t, 138 + n + t]; },
+  wall: (x, y, r) => { const row = y >> 3, off = row & 1 ? 8 : 0, g = (y & 7) === 0 || ((x + off) & 15) === 0, n = r() * 12; return g ? [30, 26, 28] : [84 + n, 76 + n, 82 + n]; },
+  lava: (x, y, r) => { const v = Math.sin(x / 64 * TAU * 2 + Math.sin(y / 64 * TAU) * 2) + Math.sin(y / 64 * TAU * 3 + x / 64 * TAU), n = r() * 20; return v > 1.1 ? [255, 232, 100] : [222 + n * 0.5, 72 + v * 30 + n, 18]; },
+  edge: (x, y, r) => { const n = r() * 12, g = (x & 15) === 0 || (y & 15) === 0; return g ? [40, 34, 36] : [66 + n, 58 + n, 62 + n]; },
+};
+
+const TRACKS = [
+  {
+    id: 'sunny', name: '阳光赛道', en: 'SUNNY CIRCUIT', theme: 'grass', song: 'sunny', roadW: 96, outSurf: S_WALL, outTile: 'hedge',
+    sky: [[58, 123, 213], [190, 226, 255]], fog: [205, 230, 255],
+    points: [[300, 1350], [300, 900], [380, 520], [600, 330], [900, 380], [1010, 640], [1160, 800], [1450, 700], [1600, 430], [1800, 390], [1860, 700], [1760, 1050], [1500, 1150], [1360, 1350], [1550, 1560], [1700, 1750], [1500, 1860], [900, 1860], [450, 1850], [300, 1700]],
+    itemRows: [0.13, 0.38, 0.62, 0.86], pads: [[0.3, 0], [0.73, 0.3]],
+    coins: [[0.05, -0.3, 5], [0.22, 0.35, 5], [0.5, 0, 6], [0.8, -0.35, 5], [0.95, 0.3, 4]],
+    pipes: [[0.17, 0.8], [0.33, -0.8], [0.46, 0.85], [0.57, -1.5], [0.67, 1.5], [0.76, -0.8], [0.9, 0.8]],
+  },
+  {
+    id: 'ghost', name: '幽灵湖', en: 'GHOST LAKE', theme: 'ghost', song: 'ghost', roadW: 92, outSurf: S_DEEP, outTile: 'water',
+    sky: [[14, 8, 36], [72, 56, 110]], fog: [58, 46, 92],
+    points: [[1024, 1750], [600, 1750], [300, 1550], [300, 1150], [550, 950], [850, 1050], [1000, 850], [800, 600], [500, 500], [450, 280], [800, 200], [1300, 250], [1500, 500], [1350, 750], [1500, 1000], [1800, 1000], [1800, 1450], [1450, 1700]],
+    itemRows: [0.1, 0.35, 0.6, 0.85], pads: [[0.49, 0], [0.93, 0]],
+    coins: [[0.04, 0, 5], [0.27, -0.3, 5], [0.45, 0.3, 5], [0.7, 0, 6], [0.9, -0.3, 4]],
+    holes: [[0.2, 0.68, 14], [0.42, -0.68, 14], [0.56, 0.66, 14], [0.78, -0.66, 14]],
+  },
+  {
+    id: 'castle', name: '熔岩城堡', en: 'LAVA CASTLE', theme: 'castle', song: 'castle', roadW: 100, outSurf: S_WALL, outTile: 'wall',
+    sky: [[26, 5, 5], [122, 32, 12]], fog: [90, 28, 12],
+    points: [[400, 1450], [400, 1100], [450, 950], [700, 900], [750, 700], [500, 600], [400, 450], [500, 300], [1000, 300], [1150, 450], [1150, 800], [1300, 950], [1700, 950], [1800, 1100], [1750, 1300], [1300, 1350], [1200, 1500], [1400, 1650], [1350, 1780], [600, 1800], [440, 1760], [400, 1650]],
+    itemRows: [0.22, 0.42, 0.6, 0.8], pads: [[0.05, 0], [0.47, 0.3], [0.9, -0.3]],
+    coins: [[0.1, 0, 5], [0.3, -0.3, 5], [0.55, 0.35, 4], [0.74, 0.3, 5]],
+    lava: [[0.15, -0.72, 18], [0.33, 0.7, 18], [0.52, 0, 13], [0.7, -0.7, 18], [0.86, 0.72, 16]],
+    lavaEdges: [[0.24, 0.29], [0.63, 0.67]],
+    pillars: [[0.12, 0.95], [0.4, -0.95], [0.78, 0.95], [0.96, -0.95]],
+  },
+];
+
+function buildMips(src, size, levels) {
+  const out = [src]; let cur = src, s = size;
+  for (let l = 1; l < levels; l++) {
+    const ns = s >> 1, nxt = new Uint32Array(ns * ns);
+    for (let y = 0; y < ns; y++) for (let x = 0; x < ns; x++) {
+      const i = 2 * y * s + 2 * x, a = cur[i], b = cur[i + 1], c = cur[i + s], d = cur[i + s + 1];
+      const R = ((a & 255) + (b & 255) + (c & 255) + (d & 255)) >> 2;
+      const G = (((a >> 8) & 255) + ((b >> 8) & 255) + ((c >> 8) & 255) + ((d >> 8) & 255)) >> 2;
+      const B = (((a >> 16) & 255) + ((b >> 16) & 255) + ((c >> 16) & 255) + ((d >> 16) & 255)) >> 2;
+      nxt[y * ns + x] = 0xff000000 | (B << 16) | (G << 8) | R;
+    }
+    out.push(nxt); cur = nxt; s = ns;
+  }
+  return out;
+}
+
+// Catmull-Rom 样条中心线，按弧长重采样（间距约 4 单位）
+function splineOf(def) {
+  const P = def.points, n = P.length, raw = [];
+  for (let i = 0; i < n; i++) {
+    const p0 = P[(i - 1 + n) % n], p1 = P[i], p2 = P[(i + 1) % n], p3 = P[(i + 2) % n];
+    for (let k = 0; k < 40; k++) {
+      const t = k / 40, t2 = t * t, t3 = t2 * t, cr = j => 0.5 * (2 * p1[j] + (-p0[j] + p2[j]) * t + (2 * p0[j] - 5 * p1[j] + 4 * p2[j] - p3[j]) * t2 + (-p0[j] + 3 * p1[j] - 3 * p2[j] + p3[j]) * t3);
+      raw.push([cr(0), cr(1)]);
+    }
+  }
+  const m = raw.length, segLen = []; let tot = 0;
+  for (let i = 0; i < m; i++) { const a = raw[i], b = raw[(i + 1) % m], l = Math.hypot(b[0] - a[0], b[1] - a[1]); segLen.push(l); tot += l; }
+  const N = Math.round(tot / 4), step = tot / N, X = new Float32Array(N), Y = new Float32Array(N), TX = new Float32Array(N), TY = new Float32Array(N);
+  let si = 0, acc = 0;
+  for (let j = 0; j < N; j++) {
+    const d = j * step;
+    while (si < m - 1 && acc + segLen[si] < d) { acc += segLen[si]; si++; }
+    const t = segLen[si] > 0 ? clamp((d - acc) / segLen[si], 0, 1) : 0, a = raw[si], b = raw[(si + 1) % m];
+    X[j] = lerp(a[0], b[0], t); Y[j] = lerp(a[1], b[1], t);
+  }
+  for (let j = 0; j < N; j++) {
+    const a = (j - 1 + N) % N, b = (j + 1) % N, dx = X[b] - X[a], dy = Y[b] - Y[a], l = Math.hypot(dx, dy) || 1;
+    TX[j] = dx / l; TY[j] = dy / l;
+  }
+  return { N, X, Y, TX, TY, tot, step };
+}
+function buildTrack(ti) {
+  const def = TRACKS[ti];
+  const { N, X, Y, TX, TY, tot, step } = splineOf(def);
+  const T = { def, ti, N, X, Y, TX, TY, L: tot, step, hw: def.roadW / 2, obstacles: [], decor: [], pads: [], hazards: [] };
+  const at = (frac, lat) => { const i = ((Math.round(frac * N) % N) + N) % N; return { i, x: X[i] - TY[i] * lat, y: Y[i] + TX[i] * lat, a: Math.atan2(TY[i], TX[i]), tx: TX[i], ty: TY[i] }; };
+  T.at = at;
+
+  // 2) 绘制贴图 (c) 与地表类型遮罩 (mk)
+  const cv = mkCanvas(TS, TS), c = cv.getContext('2d'), mv = mkCanvas(TS, TS), mk = mv.getContext('2d');
+  const MC = { road: '#000', off: '#0f0', wall: '#f00', deep: '#00f' };
+  const pat = (name, seed = 7) => c.createPattern(tileCanvas(TILES[name], seed), 'repeat');
+  const path = (ctx, i0, i1) => {
+    ctx.beginPath();
+    for (let i = i0; i <= i1; i++) { const j = i % N; if (i === i0) ctx.moveTo(X[j], Y[j]); else ctx.lineTo(X[j], Y[j]); }
+    if (i0 === 0 && i1 === N) ctx.closePath();
+  };
+  const strokeBoth = (w, style, surf, dash, fr0, fr1) => {
+    const i0 = fr0 == null ? 0 : Math.round(fr0 * N), i1 = fr1 == null ? N : Math.round(fr1 * N);
+    for (const [ctx, st] of [[c, style], [mk, surf]]) {
+      if (st == null) continue;
+      ctx.save(); ctx.lineJoin = 'round'; ctx.lineCap = fr0 == null ? 'round' : 'butt'; ctx.lineWidth = w; ctx.strokeStyle = st;
+      if (dash) ctx.setLineDash(dash);
+      path(ctx, i0, i1); ctx.stroke(); ctx.restore();
+    }
+  };
+  const fillBoth = (style, surf) => { c.fillStyle = style; c.fillRect(0, 0, TS, TS); mk.fillStyle = surf; mk.fillRect(0, 0, TS, TS); };
+  const circleBoth = (x, y, r, style, surf) => { for (const [ctx, st] of [[c, style], [mk, surf]]) { ctx.fillStyle = st; ctx.beginPath(); ctx.arc(x, y, r, 0, TAU); ctx.fill(); } };
+  const rw = def.roadW, rng = mkRng(ti * 7919 + 13);
+  const distToLine = (x, y) => { let best = 1e18; for (let i = 0; i < N; i += 2) { const dx = X[i] - x, dy = Y[i] - y, d = dx * dx + dy * dy; if (d < best) best = d; } return Math.sqrt(best); };
+
+  if (def.theme === 'grass') {
+    fillBoth(pat('grass'), MC.off);
+    // 草地小花
+    for (let i = 0; i < 1400; i++) {
+      const x = rng() * TS, y = rng() * TS; if (distToLine(x, y) < T.hw + 16) continue;
+      c.fillStyle = ['#fff', '#ffe14a', '#ff7ab8', '#fff'][i & 3]; c.fillRect(x | 0, y | 0, 2, 2);
+      c.fillStyle = '#2a7a22'; c.fillRect(x | 0, (y | 0) + 2, 2, 1);
+    }
+    // 沙地弯道外侧
+    strokeBoth(rw + 70, '#d8c07a', null);
+    strokeBoth(rw + 70, pat('grass', 3), null, [300, 220]);
+    // 路肩红白 + 路面
+    strokeBoth(rw + 14, '#f4f4f4', MC.road);
+    strokeBoth(rw + 14, '#e02a2a', null, [10, 10]);
+    strokeBoth(rw, pat('asphalt'), MC.road);
+    // 边界树篱
+    const hedge = pat('hedge');
+    for (const [x, y, w, h] of [[0, 0, TS, 48], [0, TS - 48, TS, 48], [0, 0, 48, TS], [TS - 48, 0, 48, TS]]) { c.fillStyle = hedge; c.fillRect(x, y, w, h); mk.fillStyle = MC.wall; mk.fillRect(x, y, w, h); }
+  } else if (def.theme === 'ghost') {
+    fillBoth(pat('water'), MC.deep);
+    // 水面倒影般的小亮点
+    for (let i = 0; i < 500; i++) { c.fillStyle = 'rgba(160,200,255,.25)'; c.fillRect(rng() * TS | 0, rng() * TS | 0, 3, 1); }
+    strokeBoth(rw + 16, pat('rail'), MC.wall, [150, 44]);
+    strokeBoth(rw, pat('planks'), MC.road);
+    for (const [f, l, r] of def.holes) {
+      const p = at(f, l * T.hw); circleBoth(p.x, p.y, r, pat('water', 11), MC.deep);
+      c.strokeStyle = '#3a2210'; c.lineWidth = 2; c.beginPath(); c.arc(p.x, p.y, r, 0, TAU); c.stroke();
+      T.hazards.push({ i: p.i, lat: l * T.hw, r });
+    }
+  } else {
+    fillBoth(pat('wall'), MC.wall);
+    strokeBoth(rw + 14, pat('edge'), MC.road);
+    for (const [f0, f1] of def.lavaEdges) strokeBoth(rw + 60, pat('lava', 5), MC.deep, null, f0, f1);
+    strokeBoth(rw, pat('stone'), MC.road);
+    for (const [f0, f1] of def.lavaEdges) {
+      const i0 = Math.round(f0 * N), i1 = Math.round(f1 * N);
+      for (let i = i0; i < i1; i += 3) T.hazards.push({ i: i % N, lat: T.hw + 20, r: 18 }, { i: i % N, lat: -T.hw - 20, r: 18 });
+    }
+    for (const [f, l, r] of def.lava) {
+      const p = at(f, l * T.hw);
+      circleBoth(p.x, p.y, r + 3, '#2a1a14', MC.road);
+      circleBoth(p.x, p.y, r, pat('lava', 9), MC.deep);
+      T.hazards.push({ i: p.i, lat: l * T.hw, r });
+    }
+  }
+  // 起跑线（棋盘格）与起跑格
+  {
+    const p = at(0, 0);
+    c.save(); c.translate(p.x, p.y); c.rotate(p.a);
+    for (let u = -8; u < 8; u += 4) for (let v = -T.hw; v < T.hw; v += 4) { c.fillStyle = ((((u + 8) >> 2) + ((v + T.hw) >> 2)) & 1) ? '#111' : '#f4f4f4'; c.fillRect(u, v, 4, 4); }
+    c.restore();
+    for (let s = 0; s < 8; s++) {
+      const g = gridSlot(T, s);
+      c.save(); c.translate(g.x, g.y); c.rotate(g.a); c.fillStyle = 'rgba(255,255,255,.85)';
+      c.fillRect(8, -9, 2, 18); c.fillRect(2, -9, 6, 2); c.fillRect(2, 7, 6, 2); c.restore();
+    }
+  }
+  // 加速板
+  for (const [f, l] of def.pads) {
+    const p = at(f, l * T.hw), pw = 24, pl = 32;
+    c.save(); c.translate(p.x, p.y); c.rotate(p.a);
+    c.fillStyle = '#1a1a1a'; c.fillRect(-pl / 2 - 1, -pw / 2 - 1, pl + 2, pw + 2);
+    c.fillStyle = '#ff8a00'; c.fillRect(-pl / 2, -pw / 2, pl, pw);
+    c.fillStyle = '#ffe14a';
+    for (let k = -1; k <= 1; k++) { c.beginPath(); c.moveTo(k * 9 - 3, -9); c.lineTo(k * 9 + 5, 0); c.lineTo(k * 9 - 3, 9); c.lineTo(k * 9 - 7, 9); c.lineTo(k * 9 + 1, 0); c.lineTo(k * 9 - 7, -9); c.closePath(); c.fill(); }
+    c.restore();
+    T.pads.push({ x: p.x, y: p.y, tx: p.tx, ty: p.ty, w: pw, l: pl });
+  }
+  // 障碍 / 装饰精灵
+  if (def.pipes) for (const [f, l] of def.pipes) { const p = at(f, l * T.hw); T.obstacles.push({ x: p.x, y: p.y, r: 8, spr: SPR.pipe, h: 22 }); }
+  if (def.pillars) for (const [f, l] of def.pillars) { const p = at(f, l * T.hw); T.obstacles.push({ x: p.x, y: p.y, r: 8, spr: SPR.pillar, h: 34 }); }
+  if (def.theme === 'grass') {
+    let tries = 0, cnt = 0;
+    while (cnt < 110 && tries < 4000) {
+      tries++; const x = 80 + rng() * (TS - 160), y = 80 + rng() * (TS - 160), d = distToLine(x, y);
+      if (d > T.hw + 55) { T.obstacles.push({ x, y, r: 7, spr: SPR.tree, h: 38 }); cnt++; }
+    }
+    for (let x = 24; x < TS; x += 64) for (const y of [24, TS - 24]) { T.decor.push({ x, y, z: 0, spr: SPR.tree, h: 44 }); T.decor.push({ x: y, y: x, z: 0, spr: SPR.tree, h: 44 }); }
+  } else if (def.theme === 'ghost') {
+    for (let i = 0; i < 70; i++) { const p = at(i / 70, (i & 1 ? 1 : -1) * (T.hw + 8)); if (T.hazards.some(h => Math.abs(h.i - p.i) < 6)) continue; T.decor.push({ x: p.x, y: p.y, z: 0, spr: SPR.post, h: 20 }); }
+    for (let i = 0; i < 14; i++) {
+      let x, y, tries = 0; do { x = 150 + rng() * (TS - 300); y = 150 + rng() * (TS - 300); tries++; } while (distToLine(x, y) < T.hw + 60 && tries < 50);
+      T.decor.push({ x, y, z: 10, spr: SPR.ghost, h: 16, float: rng() * TAU });
+    }
+  }
+  // 3) 读回像素，生成地表数组与 mipmap
+  const tex0 = new Uint32Array(c.getImageData(0, 0, TS, TS).data.buffer);
+  const md = mk.getImageData(0, 0, TS, TS).data, surf = new Uint8Array(TS * TS);
+  for (let i = 0, j = 0; i < surf.length; i++, j += 4) {
+    const r = md[j], g = md[j + 1], b = md[j + 2];
+    surf[i] = (r < 90 && g < 90 && b < 90) ? S_ROAD : (r >= g && r >= b) ? S_WALL : (g >= b) ? S_OFF : S_DEEP;
+  }
+  T.mips = buildMips(tex0, TS, 5);
+  const ot = tileCanvas(TILES[def.outTile], 7);
+  T.outMips = buildMips(new Uint32Array(ot.getContext('2d').getImageData(0, 0, 64, 64).data.buffer), 64, 5);
+  T.bg = buildBG(def.theme);
+  T.surf = surf;
+  T.surfAt = (x, y) => (x < 0 || y < 0 || x >= TS || y >= TS) ? def.outSurf : surf[(y | 0) * TS + (x | 0)];
+  T.solid = (x, y) => T.surfAt(x, y) === S_WALL;
+  T.normalAt = (x, y) => {
+    let nx = 0, ny = 0;
+    for (let k = 0; k < 12; k++) { const a = k / 12 * TAU, dx = Math.cos(a), dy = Math.sin(a); if (!T.solid(x + dx * 7, y + dy * 7)) { nx += dx; ny += dy; } }
+    const l = Math.hypot(nx, ny); return l > 0.01 ? { x: nx / l, y: ny / l } : null;
+  };
+  T.padAt = (x, y) => { for (const p of T.pads) { const dx = x - p.x, dy = y - p.y, u = dx * p.tx + dy * p.ty, v = -dx * p.ty + dy * p.tx; if (Math.abs(u) < p.l / 2 && Math.abs(v) < p.w / 2) return true; } return false; };
+  T.nearest = (x, y) => { let best = 0, bd = 1e18; for (let i = 0; i < N; i++) { const dx = X[i] - x, dy = Y[i] - y, d = dx * dx + dy * dy; if (d < bd) { bd = d; best = i; } } return best; };
+  T.mini = buildMinimap(T, 128);
+  return T;
+}
+function gridSlot(T, s) {
+  const row = s >> 1, col = s & 1, back = 26 + row * 26 + col * 10, i = (T.N - Math.round(back / T.step)) % T.N, lat = (col ? 1 : -1) * T.hw * 0.42;
+  return { i, x: T.X[i] - T.TY[i] * lat, y: T.Y[i] + T.TX[i] * lat, a: Math.atan2(T.TY[i], T.TX[i]) };
+}
+function buildMinimap(T, size) {
+  const cv = mkCanvas(size, size), c = cv.getContext('2d'), k = size / TS;
+  const line = (w, col) => { c.lineJoin = 'round'; c.lineWidth = w; c.strokeStyle = col; c.beginPath(); for (let i = 0; i <= T.N; i++) { const j = i % T.N; i ? c.lineTo(T.X[j] * k, T.Y[j] * k) : c.moveTo(T.X[j] * k, T.Y[j] * k); } c.closePath(); c.stroke(); };
+  line(T.def.roadW * k + 5, 'rgba(0,0,0,.7)'); line(T.def.roadW * k + 2, '#fff'); line(T.def.roadW * k, '#8a8fa0');
+  c.save(); c.translate(T.X[0] * k, T.Y[0] * k); c.rotate(Math.atan2(T.TY[0], T.TX[0])); c.fillStyle = '#fff'; c.fillRect(-1, -5, 2, 10); c.restore();
+  return cv;
+}
+const PREVIEW = [];
+function trackPreview(ti) { if (!PREVIEW[ti]) PREVIEW[ti] = buildMinimap({ def: TRACKS[ti], ...splineOf(TRACKS[ti]) }, 128); return PREVIEW[ti]; }
+let TRACK_CACHE = { ti: -1, T: null };
+function getTrack(ti) { if (TRACK_CACHE.ti !== ti) TRACK_CACHE = { ti, T: buildTrack(ti) }; return TRACK_CACHE.T; }
+
+// ----------------------------------------------------------------- race
+function makeAI(skill) { return { lane: rand(-0.45, 0.45), freq: rand(0.25, 0.6), phase: rand(0, TAU), t: 0, skill, itemTimer: 0, stuck: 0, dodge: 0, dodgeT: 0, curv: 0 }; }
+function makeKart(def, human, skill) {
+  return {
+    def, name: def.name, color: def.kart, stats: def.stats, frames: def.frames, human,
+    x: 0, y: 0, z: 0, vz: 0, angle: 0, vx: 0, vy: 0,
+    drift: 0, driftCharge: 0, driftLevel: 0, hopping: false, prevDrift: false, prevItem: false,
+    boostT: 0, boostPow: 1, spinT: 0, starT: 0, shrinkT: 0, squishT: 0, invT: 0, stallT: 0,
+    coins: 0, item: null, itemCount: 0, itemState: 'none', rouletteT: 0, roulTick: 0,
+    idx: 0, lap: 0, maxLap: 0, dist: 0, place: 1, finished: false, finishTime: 0, lapTimes: [], lapStart: 0,
+    wrongT: 0, fall: null, lastSafeX: 0, lastSafeY: 0, ai: makeAI(skill), auto: human < 0, speedMul: 1, accelFirst: null, offT: 0,
+  };
+}
+
+function createRace(opts) {
+  const T = getTrack(opts.trackIdx);
+  const R = {
+    opts, track: T, mode: opts.mode, cc: opts.cc, base: CC_TABLE[opts.cc].speed, aiBase: CC_TABLE[opts.cc].ai,
+    laps: opts.mode === 'attract' ? 9999 : LAPS, time: 0, cd: opts.mode === 'attract' ? 3 : 0, cdStep: -1,
+    phase: opts.mode === 'attract' ? 'race' : 'countdown',
+    karts: [], proj: [], parts: [], boxes: [], coins: [], humans: [], views: [], flash: 0, endT: 0, done: false,
+    lastLightning: -99, items: opts.mode !== 'tt', engines: [], attractT: 0,
+  };
+  const skills = [1.0, 0.99, 0.975, 0.965, 0.955, 0.945, 0.935, 0.925].sort(() => Math.random() - 0.5);
+  opts.grid.forEach((racer, slot) => {
+    const k = makeKart(racer.def, racer.human, skills[slot % 8]);
+    const g = gridSlot(T, slot);
+    k.x = g.x; k.y = g.y; k.angle = g.a; k.idx = g.i; k.lastSafeX = g.x; k.lastSafeY = g.y;
+    k.dist = g.i * T.step; k.gp = racer;
+    R.karts.push(k);
+    if (racer.human >= 0) R.humans[racer.human] = k;
+  });
+  if (opts.mode === 'tt') for (const k of R.humans) { k.item = 'triple'; k.itemCount = 3; k.itemState = 'ready'; }
+  if (R.items) {
+    for (const f of T.def.itemRows) for (const l of [-0.6, -0.2, 0.2, 0.6]) { const p = T.at(f, l * T.hw); R.boxes.push({ x: p.x, y: p.y, t: 0 }); }
+    for (const [f, l, n] of T.def.coins) for (let j = 0; j < n; j++) { const p = T.at(f + j * 14 / T.L, l * T.hw); R.coins.push({ x: p.x, y: p.y, alive: true }); }
+  }
+  const mkView = (kart, oy, h, hy, D, kartFrac, f) => ({ kart, oy, h, hy, D, f, H: (kartFrac * h - hy) * D / f, cam: { x: 0, y: 0, angle: kart.angle, z: 0, orbit: 0 }, msgs: [] });
+  if (R.humans.length === 2) {
+    R.views.push(mkView(R.humans[0], 0, 107, 30, 84, 0.82, 160));
+    R.views.push(mkView(R.humans[1], 109, 107, 30, 84, 0.82, 160));
+  } else {
+    R.views.push(mkView(R.humans[0] || R.karts[0], 0, RH, 62, 60, 0.8, 180));
+  }
+  for (const v of R.views) snapCam(v);
+  return R;
+}
+function snapCam(v) { const k = v.kart, c = v.cam; c.angle = k.angle; c.x = k.x - Math.cos(c.angle) * v.D; c.y = k.y - Math.sin(c.angle) * v.D; }
+function viewOf(R, k) { return R.views.find(v => v.kart === k); }
+function humanNear(R, x, y) {
+  let best = 1e9;
+  for (const v of R.views) { const d = Math.hypot(v.kart.x - x, v.kart.y - y); if (d < best) best = d; }
+  return best;
+}
+function sfxAt(R, name, x, y) { if (R.mode === 'attract' || G.scene !== 'race') return; const d = humanNear(R, x, y); if (d < 320) sfx(name, 1 - d / 360); }
+function sfxK(R, k, name) { if (R.mode === 'attract' || G.scene !== 'race') return; if (k.human >= 0) sfx(name); else sfxAt(R, name, k.x, k.y); }
+function msg(R, k, text, col = '#fff', dur = 1.6) { const v = viewOf(R, k); if (v) v.msgs.push({ text, col, t: 0, dur }); }
+function addPart(R, x, y, z, vx, vy, vz, life, col, size, g = 260) { if (R.parts.length > 700) return; R.parts.push({ x, y, z, vx, vy, vz, life, max: life, col, size, g }); }
+
+function stepRace(R, dt) {
+  const T = R.track;
+  if (R.phase === 'countdown') {
+    R.cd += dt;
+    const s = Math.floor(R.cd);
+    if (s > R.cdStep && s < 3) { R.cdStep = s; sfx('count'); }
+    for (const k of R.humans) {
+      const inp = readInput(k.human, R.humans.length > 1);
+      if (inp.accel) { if (k.accelFirst == null) k.accelFirst = R.cd; } else k.accelFirst = null;
+    }
+    if (R.cd >= 3) {
+      R.phase = 'race'; sfx('go');
+      MUSIC.play(T.def.song);
+      for (const k of R.karts) {
+        if (k.human >= 0) {
+          if (k.accelFirst != null && k.accelFirst >= 1.0 && k.accelFirst <= 2.25) { k.boostT = 1.0; k.boostPow = 1.4; sfx('boost'); msg(R, k, '起跑加速!', '#7ff', 1.2); }
+          else if (k.accelFirst != null && k.accelFirst < 1.0) { k.stallT = 1.0; msg(R, k, '起步熄火…', '#faa', 1.2); }
+        } else if (Math.random() < 0.35) { k.boostT = 0.8; k.boostPow = 1.35; }
+      }
+    }
+  } else R.time += dt;
+
+  let humanDist = null;
+  for (const k of R.humans) if (!k.finished) humanDist = humanDist == null ? k.dist : Math.max(humanDist, k.dist);
+  R.humanDist = humanDist;
+
+  for (const k of R.karts) {
+    const inp = (k.human >= 0 && !k.auto) ? readInput(k.human, R.humans.length > 1) : aiInput(k, R, dt);
+    updateKart(k, inp, dt, R);
+  }
+  kartCollisions(R);
+  updateProjectiles(R, dt);
+  // 道具箱
+  for (const b of R.boxes) {
+    if (b.t > 0) { b.t -= dt; continue; }
+    for (const k of R.karts) {
+      if (k.fall) continue;
+      const dx = k.x - b.x, dy = k.y - b.y;
+      if (dx * dx + dy * dy < 13 * 13) {
+        b.t = 2.2; sfxK(R, k, 'box');
+        for (let i = 0; i < 10; i++) addPart(R, b.x, b.y, 6, rand(-60, 60), rand(-60, 60), rand(40, 120), 0.5, `hsl(${i * 36},90%,65%)`, 1.6);
+        if (k.itemState === 'none') { k.itemState = 'roulette'; k.rouletteT = k.auto ? 0.8 : 1.2; }
+        break;
+      }
+    }
+  }
+  // 金币
+  for (const c of R.coins) {
+    if (!c.alive) continue;
+    for (const k of R.karts) {
+      if (k.fall) continue;
+      const dx = k.x - c.x, dy = k.y - c.y;
+      if (dx * dx + dy * dy < 11 * 11) { c.alive = false; if (k.coins < 10) k.coins++; sfxK(R, k, 'coin'); break; }
+    }
+  }
+  // 粒子
+  for (const p of R.parts) {
+    p.life -= dt; p.x += p.vx * dt; p.y += p.vy * dt; p.z += p.vz * dt; p.vz -= p.g * dt;
+    if (p.z < 0) { p.z = 0; p.vz *= -0.3; p.vx *= 0.6; p.vy *= 0.6; }
+  }
+  R.parts = R.parts.filter(p => p.life > 0);
+  // 排名
+  const order = [...R.karts].sort((a, b) => (a.finished && b.finished) ? a.finishTime - b.finishTime : a.finished ? -1 : b.finished ? 1 : b.dist - a.dist);
+  order.forEach((k, i) => { if (!k.finished) k.place = i + 1; });
+  R.order = order;
+  // 镜头 / 提示
+  for (const v of R.views) {
+    if (R.mode === 'attract') { R.attractT += dt; if (R.attractT > 9) { R.attractT = 0; v.kart = order[Math.floor(Math.random() * 3)]; snapCam(v); } }
+    updateCam(v, R, dt);
+    for (const m of v.msgs) m.t += dt;
+    v.msgs = v.msgs.filter(m => m.t < m.dur);
+  }
+  if (R.flash > 0) R.flash = Math.max(0, R.flash - dt * 2.5);
+  // 结束判定
+  if (R.mode !== 'attract' && R.humans.every(k => k.finished)) {
+    R.endT += dt;
+    if (R.endT > 3.5 && !R.done) { R.done = true; onRaceDone(R); }
+  }
+}
+
+function updateCam(v, R, dt) {
+  const k = v.kart, cam = v.cam;
+  let target = k.angle, D = v.D;
+  if (k.finished && k.human >= 0) { cam.orbit += dt * 0.55; target = k.angle + cam.orbit; D *= 1.25; }
+  cam.angle += angDiff(cam.angle, target) * Math.min(1, dt * (k.drift ? 3.5 : 5.5));
+  cam.x = k.x - Math.cos(cam.angle) * D; cam.y = k.y - Math.sin(cam.angle) * D;
+  cam.z = k.fall ? 0 : Math.max(0, k.z) * 0.5;
+}
+
+function updateKart(k, inp, dt, R) {
+  const T = R.track;
+  for (const t of ['boostT', 'spinT', 'starT', 'shrinkT', 'squishT', 'invT', 'stallT']) if (k[t] > 0) k[t] = Math.max(0, k[t] - dt);
+  // 道具轮盘
+  if (k.itemState === 'roulette') {
+    k.rouletteT -= dt;
+    if (k.human >= 0 && !k.auto) { k.roulTick -= dt; if (k.roulTick <= 0) { k.roulTick = 0.07; if (G.scene === 'race') sfx('roul'); } }
+    if (k.rouletteT <= 0) {
+      k.item = rollItem(R, k); k.itemCount = k.item === 'triple' ? 3 : 1; k.itemState = 'ready';
+      k.ai.itemTimer = rand(0.5, 2.5);
+      if (k.human >= 0 && !k.auto && G.scene === 'race') sfx('get');
+    }
+  }
+  if (k.fall) { updateFall(k, dt, R); k.prevDrift = inp.drift; k.prevItem = inp.item; return; }
+
+  const st = k.stats;
+  let max = R.base * st.speed * (1 + 0.008 * k.coins) * k.speedMul;
+  if (k.shrinkT > 0) max *= 0.68;
+  const grounded = k.z <= 0 && k.vz <= 0;
+  const surf = T.surfAt(k.x, k.y);
+  if (grounded && T.padAt(k.x, k.y)) { if (k.boostT < 0.5) sfxK(R, k, 'boost'); k.boostT = Math.max(k.boostT, 0.9); k.boostPow = 1.4; }
+  const boosting = k.boostT > 0, star = k.starT > 0;
+  const off = surf === S_OFF && grounded && !boosting && !star;
+  if (star) max *= 1.15;
+  if (boosting) max *= k.boostPow;
+  if (off) max *= 0.5;
+  k.offT = off ? k.offT + dt : 0;
+
+  const disabled = k.spinT > 0 || k.squishT > 0 || k.stallT > 0 || R.phase === 'countdown';
+  const steer = disabled ? 0 : inp.steer, accel = !disabled && inp.accel, brake = !disabled && inp.brake;
+  let ca = Math.cos(k.angle), sa = Math.sin(k.angle);
+  let vf = k.vx * ca + k.vy * sa;
+
+  // 小跳 / 漂移
+  if (!disabled && inp.drift && !k.prevDrift && grounded) { k.vz = 58; k.z = 0.01; k.hopping = true; sfxK(R, k, 'hop'); }
+  if (k.z > 0 || k.vz > 0) {
+    k.vz -= 430 * dt; k.z += k.vz * dt;
+    if (k.z <= 0) {
+      k.z = 0; k.vz = 0;
+      if (k.hopping) { k.hopping = false; if (inp.drift && Math.abs(steer) > 0.25 && vf > max * 0.35) { k.drift = Math.sign(steer); k.driftCharge = 0; k.driftLevel = 0; } }
+    }
+  }
+  if (k.drift) {
+    if (!inp.drift || vf < max * 0.25 || disabled) {
+      if (k.driftLevel > 0 && !disabled) { k.boostT = Math.max(k.boostT, k.driftLevel === 1 ? 0.6 : 1.15); k.boostPow = 1.32; sfxK(R, k, 'boost'); }
+      k.drift = 0; k.driftLevel = 0; k.driftCharge = 0;
+    } else {
+      const into = steer * k.drift;
+      if (!off) k.driftCharge += dt * (0.75 + 0.75 * Math.max(0, into));
+      const lvl = k.driftCharge > 2.3 ? 2 : k.driftCharge > 1.05 ? 1 : 0;
+      if (lvl > k.driftLevel) { k.driftLevel = lvl; if (k.human >= 0 && !k.auto) sfx(lvl === 1 ? 'mini1' : 'mini2'); }
+    }
+  }
+  // 转向
+  const sp = Math.abs(vf), handling = st.handling;
+  let turn = k.drift ? k.drift * (0.55 + 0.45 * steer * k.drift) * 2.05 * handling : steer * 1.8 * handling;
+  if (k.shrinkT > 0) turn *= 1.1;
+  const tf = Math.min(1, sp / 30) * (1 - 0.18 * Math.min(1, sp / 200)) * (vf < -1 ? -1 : 1);
+  k.angle += turn * tf * dt;
+  ca = Math.cos(k.angle); sa = Math.sin(k.angle);
+  vf = k.vx * ca + k.vy * sa;
+  let vl = -k.vx * sa + k.vy * ca;
+  // 引擎
+  const A = 92 * st.accel;
+  if (accel) { if (vf < max) vf = Math.min(max, vf + A * (1.15 - Math.max(0, vf) / max) * dt); }
+  else if (brake) { if (vf > 0) vf = Math.max(0, vf - 260 * dt); else vf = Math.max(-max * 0.35, vf - 90 * dt); }
+  else vf -= Math.sign(vf) * Math.min(Math.abs(vf), 45 * dt);
+  if (boosting && vf < max) vf = Math.min(max, vf + 320 * dt);
+  if (vf > max) vf = Math.max(max, vf - (off ? 240 : 90) * dt);
+  if (k.spinT > 0) vf *= Math.exp(-2.8 * dt);
+  if (k.squishT > 0 || k.stallT > 0) vf *= Math.exp(-6 * dt);
+  const grip = k.drift ? 2.4 : off ? 7 : 11;
+  vl *= Math.exp(-grip * dt);
+  k.vx = ca * vf - sa * vl; k.vy = sa * vf + ca * vl;
+
+  moveKart(k, dt, R);
+
+  // 状态、粒子
+  const now = T.surfAt(k.x, k.y);
+  if (now !== S_DEEP && now !== S_WALL && k.z <= 0) { k.lastSafeX = k.x; k.lastSafeY = k.y; }
+  if (now === S_DEEP && k.z <= 0.5) { startFall(k, R); }
+  {
+  const bx = k.x - ca * 9, by = k.y - sa * 9, rx = -sa * 6, ry = ca * 6;
+  if (k.drift && k.z <= 0 && Math.random() < 0.8) {
+    const col = k.driftLevel === 2 ? (Math.random() < 0.5 ? '#ff9a1a' : '#ffe14a') : k.driftLevel === 1 ? (Math.random() < 0.5 ? '#3cc8ff' : '#bdf') : '#e8e8e8';
+    for (const s of [-1, 1]) addPart(R, bx + rx * s, by + ry * s, 1, rand(-30, 30) - ca * 20, rand(-30, 30) - sa * 20, rand(30, 80), k.driftLevel ? 0.22 : 0.15, col, k.driftLevel ? 1.3 : 1);
+  }
+  if (boosting && Math.random() < 0.9) addPart(R, k.x - ca * 13, k.y - sa * 13, 4, -ca * 60 + rand(-20, 20), -sa * 60 + rand(-20, 20), rand(0, 40), 0.18, Math.random() < 0.5 ? '#ffd23a' : '#ff6a00', 1.8, 0);
+  if (off && sp > 30 && Math.random() < 0.5) addPart(R, bx, by, 1, rand(-20, 20), rand(-20, 20), rand(30, 70), 0.35, T.def.theme === 'grass' ? '#8a6a3a' : '#777', 1.4);
+  if (star && Math.random() < 0.6) addPart(R, k.x + rand(-8, 8), k.y + rand(-8, 8), rand(2, 14), 0, 0, 20, 0.3, `hsl(${Math.random() * 360},100%,70%)`, 1.2, 0);
+  }
+
+  // 道具
+  const itemPress = inp.item && !k.prevItem, itemRel = !inp.item && k.prevItem;
+  if (k.human >= 0 && !k.auto && R.phase === 'race') {
+    if (k.itemState === 'ready' && itemPress) { if (k.item === 'banana' || k.item === 'green' || k.item === 'red') k.itemState = 'hold'; else useItem(R, k, false); }
+    else if (k.itemState === 'hold' && itemRel) useItem(R, k, inp.brake);
+  }
+  k.prevDrift = inp.drift; k.prevItem = inp.item;
+
+  updateProgress(k, R, dt);
+}
+
+function moveKart(k, dt, R) {
+  const T = R.track, nx = k.x + k.vx * dt, ny = k.y + k.vy * dt, sp = Math.hypot(k.vx, k.vy);
+  const lx = nx + (sp > 1 ? k.vx / sp * 6 : 0), ly = ny + (sp > 1 ? k.vy / sp * 6 : 0);
+  const hitC = T.solid(nx, ny), hitL = T.solid(lx, ly);
+  if (hitC || hitL) {
+    const px = hitC ? nx : lx, py = hitC ? ny : ly;
+    let n = T.normalAt(px, py) || (sp > 0.1 ? { x: -k.vx / sp, y: -k.vy / sp } : { x: 1, y: 0 });
+    const vn = k.vx * n.x + k.vy * n.y;
+    if (vn < 0) {
+      k.vx -= 1.4 * vn * n.x; k.vy -= 1.4 * vn * n.y; k.vx *= 0.8; k.vy *= 0.8;
+      if (-vn > 35) { sfxK(R, k, 'bump'); for (let i = 0; i < 5; i++) addPart(R, px, py, 3, rand(-40, 40), rand(-40, 40), rand(40, 90), 0.3, '#ffe9a0', 1); }
+      if (-vn > 50) { k.drift = 0; }
+    }
+    k.x += n.x * 0.8; k.y += n.y * 0.8;
+    if (T.solid(k.x, k.y)) { k.x = k.lastSafeX; k.y = k.lastSafeY; }
+  } else { k.x = nx; k.y = ny; }
+  // 圆形障碍物
+  for (const o of T.obstacles) {
+    const dx = k.x - o.x, dy = k.y - o.y, rr = o.r + 6;
+    if (Math.abs(dx) > rr || Math.abs(dy) > rr) continue;
+    const d = Math.hypot(dx, dy);
+    if (d < rr && d > 0.01) {
+      const n = { x: dx / d, y: dy / d };
+      k.x = o.x + n.x * rr; k.y = o.y + n.y * rr;
+      const vn = k.vx * n.x + k.vy * n.y;
+      if (vn < 0) { k.vx -= 1.5 * vn * n.x; k.vy -= 1.5 * vn * n.y; k.vx *= 0.75; k.vy *= 0.75; if (-vn > 35) sfxK(R, k, 'bump'); }
+    }
+  }
+}
+
+function startFall(k, R) {
+  k.fall = { t: 0, placed: false }; k.drift = 0; k.driftLevel = 0; k.boostT = 0;
+  const lost = Math.min(k.coins, 3); k.coins -= lost;
+  if (k.itemState === 'hold') { k.item = null; k.itemState = 'none'; }
+  sfxK(R, k, R.track.def.theme === 'castle' ? 'fall' : 'splash');
+  const col = R.track.def.theme === 'castle' ? '#ff7a1a' : '#7fb8ff';
+  for (let i = 0; i < 16; i++) addPart(R, k.x, k.y, 0, rand(-50, 50), rand(-50, 50), rand(80, 180), 0.6, col, 1.6);
+}
+function respawnKart(k, R) { k.fall = { t: 0.7, placed: false }; k.drift = 0; }
+function updateFall(k, dt, R) {
+  const f = k.fall, T = R.track;
+  f.t += dt;
+  if (!f.placed) {
+    if (f.t < 0.7) { k.x += k.vx * dt * 0.5; k.y += k.vy * dt * 0.5; k.z = -f.t * 26; return; }
+    let i = (k.idx - 3 + T.N) % T.N;
+    for (let s = 0; s < 60 && T.surfAt(T.X[i], T.Y[i]) !== S_ROAD; s++) i = (i - 1 + T.N) % T.N;
+    k.x = T.X[i]; k.y = T.Y[i]; k.angle = Math.atan2(T.TY[i], T.TX[i]); k.vx = k.vy = 0; k.z = 46; k.vz = 0; k.idx = i;
+    f.placed = true; if (k.human >= 0 && !k.auto) sfx('respawn');
+    const v = viewOf(R, k); if (v) v.cam.angle = k.angle;
+  } else {
+    k.z = Math.max(0, k.z - 40 * dt);
+    if (k.z <= 0) { k.fall = null; k.invT = 1.0; k.lastSafeX = k.x; k.lastSafeY = k.y; }
+  }
+}
+
+function updateProgress(k, R, dt) {
+  const T = R.track, N = T.N;
+  let best = k.idx, bd = 1e18;
+  for (let o = -14; o <= 34; o++) { const i = (k.idx + o + N) % N, dx = T.X[i] - k.x, dy = T.Y[i] - k.y, d = dx * dx + dy * dy; if (d < bd) { bd = d; best = i; } }
+  if (bd > 160 * 160) best = T.nearest(k.x, k.y);
+  const prev = k.idx; k.idx = best;
+  if (prev > N * 0.75 && best < N * 0.25) k.lap++;
+  else if (prev < N * 0.25 && best > N * 0.75) k.lap--;
+  k.dist = k.lap * T.L + best * T.step;
+  // 逆行检测
+  const along = k.vx * T.TX[best] + k.vy * T.TY[best];
+  if (along < -20 && !k.fall && R.phase === 'race') k.wrongT += dt; else k.wrongT = Math.max(0, k.wrongT - dt * 2);
+  // 过线
+  if (k.lap > k.maxLap && !k.finished) {
+    k.maxLap = k.lap;
+    if (k.lap >= 2) { k.lapTimes.push(R.time - k.lapStart); k.lapStart = R.time; }
+    if (k.lap > R.laps) finishKart(k, R);
+    else if (k.lap >= 2 && k.human >= 0) {
+      if (k.lap === R.laps) { msg(R, k, '最终圈!', '#ffd23a', 2.2); sfx('final'); MUSIC.tempo = 1.12; }
+      else { msg(R, k, `第 ${k.lap} 圈`, '#fff', 1.4); sfx('lap'); }
+    }
+  }
+}
+function finishKart(k, R) {
+  k.finished = true; k.finishTime = R.time;
+  k.place = R.karts.filter(o => o.finished).length;
+  if (k.human >= 0) { k.auto = true; sfx('finish'); msg(R, k, 'FINISH!', '#fff', 3.2); if (R.humans.every(h => h.finished)) MUSIC.stop(); }
+}
+
+function rollItem(R, k) {
+  const n = R.karts.length;
+  const TABLE = [
+    [['banana', 35], ['green', 30], ['coin', 20], ['red', 10], ['mushroom', 5]],
+    [['banana', 15], ['green', 20], ['red', 25], ['mushroom', 20], ['coin', 10], ['triple', 5], ['star', 5]],
+    [['red', 25], ['mushroom', 20], ['triple', 20], ['star', 15], ['green', 10], ['lightning', 5], ['banana', 5]],
+    [['triple', 25], ['star', 25], ['red', 20], ['lightning', 15], ['mushroom', 15]],
+  ];
+  const bucket = n <= 1 ? 1 : clamp(Math.floor((k.place - 1) / n * 4 + (n <= 2 ? 1 : 0)), 0, 3);
+  for (let tries = 0; tries < 10; tries++) {
+    const tb = TABLE[bucket], tot = tb.reduce((s, e) => s + e[1], 0);
+    let r = Math.random() * tot, pick = tb[0][0];
+    for (const [it, w] of tb) { r -= w; if (r <= 0) { pick = it; break; } }
+    if (pick === 'lightning' && (R.time - R.lastLightning < 20 || R.karts.some(o => o.item === 'lightning'))) continue;
+    return pick;
+  }
+  return 'mushroom';
+}
+function useItem(R, k, back) {
+  const it = k.item; if (!it) return;
+  let consumed = true;
+  switch (it) {
+    case 'banana': spawnProj(R, 'banana', k, true); break;
+    case 'green': spawnProj(R, 'green', k, back); break;
+    case 'red': spawnProj(R, back ? 'green' : 'red', k, back); break;
+    case 'mushroom': case 'triple':
+      k.boostT = Math.max(k.boostT, 1.2); k.boostPow = 1.45; sfxK(R, k, 'boost');
+      if (it === 'triple') { k.itemCount--; consumed = k.itemCount <= 0; }
+      break;
+    case 'star': k.starT = 7.5; sfxK(R, k, 'star'); break;
+    case 'lightning': lightning(R, k); break;
+    case 'coin': k.coins = Math.min(10, k.coins + 2); sfxK(R, k, 'coin'); break;
+  }
+  if (consumed) { k.item = null; k.itemState = 'none'; } else k.itemState = 'ready';
+}
+function spawnProj(R, type, k, backward) {
+  const ca = Math.cos(k.angle), sa = Math.sin(k.angle), dir = backward ? -1 : 1;
+  if (type === 'banana') {
+    R.proj.push({ type, x: k.x - ca * 14, y: k.y - sa * 14, z: 0, vx: 0, vy: 0, owner: k, age: 0, alive: true });
+    sfxK(R, k, 'drop');
+  } else {
+    const sp = 310, ang = k.angle + (backward ? Math.PI : 0);
+    const p = { type, x: k.x + ca * 14 * dir, y: k.y + sa * 14 * dir, z: 0, vx: Math.cos(ang) * sp, vy: Math.sin(ang) * sp, angle: ang, owner: k, age: 0, alive: true, bounces: 0, idx: k.idx, target: null };
+    if (type === 'red') p.target = R.karts.find(o => o.place === k.place - 1 && !o.finished) || null;
+    R.proj.push(p); sfxK(R, k, 'shell');
+  }
+}
+function lightning(R, k) {
+  R.flash = 0.9; if (G.scene === 'race' && R.mode !== 'attract') sfx('lightning');
+  R.lastLightning = R.time;
+  for (const o of R.karts) {
+    if (o === k || o.starT > 0 || o.fall || o.finished) continue;
+    o.shrinkT = 3 + (R.karts.length - o.place) * 0.4; o.spinT = Math.max(o.spinT, 0.6); o.drift = 0;
+    if (o.itemState === 'hold') { o.item = null; o.itemState = 'none'; }
+  }
+}
+function hitKart(R, k, kind) {
+  if (k.starT > 0 || k.invT > 0 || k.fall) return false;
+  k.spinT = kind === 'banana' ? 0.9 : 1.3; k.invT = k.spinT + 0.5; k.drift = 0; k.driftLevel = 0; k.boostT = 0;
+  if (kind !== 'banana') { k.vz = 85; k.z = 0.01; k.hopping = false; }
+  const lost = Math.min(k.coins, kind === 'banana' ? 2 : 3); k.coins -= lost;
+  for (let i = 0; i < lost; i++) addPart(R, k.x, k.y, 8, rand(-60, 60), rand(-60, 60), rand(90, 150), 0.8, 'coin', 5, 300);
+  for (let i = 0; i < 8; i++) addPart(R, k.x, k.y, 10, rand(-50, 50), rand(-50, 50), rand(40, 100), 0.5, '#fff27a', 1.5, 120);
+  if (k.itemState === 'hold') { k.item = null; k.itemState = 'none'; }
+  sfxK(R, k, 'hit');
+  return true;
+}
+function killProj(R, p) {
+  p.alive = false;
+  for (let i = 0; i < 8; i++) addPart(R, p.x, p.y, 4, rand(-60, 60), rand(-60, 60), rand(40, 120), 0.4, p.type === 'red' ? '#ff6a6a' : p.type === 'green' ? '#6aff8a' : '#ffe14a', 1.4);
+}
+function updateProjectiles(R, dt) {
+  const T = R.track, N = T.N;
+  for (const p of R.proj) {
+    if (!p.alive) continue;
+    p.age += dt;
+    if (p.type === 'banana') {
+      if (p.age < 0.05 && T.surfAt(p.x, p.y) === S_DEEP) p.alive = false;
+      if (p.age > 90) p.alive = false;
+      continue;
+    }
+    if (p.type === 'red') {
+      let best = p.idx, bd = 1e18;
+      for (let o = -4; o <= 20; o++) { const i = (p.idx + o + N) % N, dx = T.X[i] - p.x, dy = T.Y[i] - p.y, d = dx * dx + dy * dy; if (d < bd) { bd = d; best = i; } }
+      p.idx = best;
+      let tx, ty; const tg = p.target;
+      if (tg && !tg.fall && !tg.finished && Math.hypot(tg.x - p.x, tg.y - p.y) < 170) { tx = tg.x; ty = tg.y; }
+      else { const j = (p.idx + 12) % N; tx = T.X[j]; ty = T.Y[j]; }
+      const des = Math.atan2(ty - p.y, tx - p.x);
+      p.angle += clamp(angDiff(p.angle, des), -6.5 * dt, 6.5 * dt);
+      p.vx = Math.cos(p.angle) * 290; p.vy = Math.sin(p.angle) * 290;
+    }
+    const nx = p.x + p.vx * dt, ny = p.y + p.vy * dt;
+    if (T.solid(nx, ny)) {
+      if (p.type === 'green' && p.bounces < 6) {
+        const sp = Math.hypot(p.vx, p.vy) || 1, n = T.normalAt(nx, ny) || { x: -p.vx / sp, y: -p.vy / sp }, vn = p.vx * n.x + p.vy * n.y;
+        if (vn < 0) { p.vx -= 2 * vn * n.x; p.vy -= 2 * vn * n.y; }
+        p.bounces++;
+      } else killProj(R, p);
+    } else { p.x = nx; p.y = ny; }
+    for (const o of T.obstacles) {
+      const dx = p.x - o.x, dy = p.y - o.y, d = Math.hypot(dx, dy);
+      if (d < o.r + 4) {
+        if (p.type === 'green' && p.bounces < 6) { const n = { x: dx / d, y: dy / d }, vn = p.vx * n.x + p.vy * n.y; if (vn < 0) { p.vx -= 2 * vn * n.x; p.vy -= 2 * vn * n.y; } p.x = o.x + n.x * (o.r + 4); p.y = o.y + n.y * (o.r + 4); p.bounces++; }
+        else killProj(R, p);
+      }
+    }
+    if (p.alive && T.surfAt(p.x, p.y) === S_DEEP) { p.alive = false; for (let i = 0; i < 6; i++) addPart(R, p.x, p.y, 0, rand(-30, 30), rand(-30, 30), rand(60, 120), 0.5, '#9cf', 1.2); }
+    if (p.age > (p.type === 'green' ? 9 : 14)) killProj(R, p);
+  }
+  // 与赛车碰撞
+  for (const p of R.proj) {
+    if (!p.alive) continue;
+    for (const k of R.karts) {
+      if (k.fall || (p.owner === k && p.age < 0.4) || Math.abs(k.z - p.z) > 8) continue;
+      const dx = k.x - p.x, dy = k.y - p.y, rr = p.type === 'banana' ? 9 : 10;
+      if (dx * dx + dy * dy < rr * rr) {
+        if (k.starT > 0 || k.invT > 0) { killProj(R, p); break; }
+        hitKart(R, k, p.type === 'banana' ? 'banana' : 'shell');
+        killProj(R, p); break;
+      }
+      // 拖在身后的道具可以挡住攻击
+      if (k.itemState === 'hold' && p.owner !== k) {
+        const hx = k.x - Math.cos(k.angle) * 12, hy = k.y - Math.sin(k.angle) * 12;
+        if ((hx - p.x) ** 2 + (hy - p.y) ** 2 < 100) { killProj(R, p); k.item = null; k.itemState = 'none'; sfxK(R, k, 'bump'); break; }
+      }
+    }
+  }
+  // 道具之间互相抵消
+  const moving = R.proj.filter(p => p.alive && p.type !== 'banana');
+  for (const a of moving) for (const b of R.proj) {
+    if (a === b || !a.alive || !b.alive || (b.type !== 'banana' && b.age < 0.2 && a.age < 0.2)) continue;
+    if ((a.x - b.x) ** 2 + (a.y - b.y) ** 2 < 100) { killProj(R, a); killProj(R, b); }
+  }
+  R.proj = R.proj.filter(p => p.alive);
+}
+function kartCollisions(R) {
+  const ks = R.karts;
+  for (let i = 0; i < ks.length; i++) for (let j = i + 1; j < ks.length; j++) {
+    const a = ks[i], b = ks[j];
+    if (a.fall || b.fall || Math.abs(a.z - b.z) > 6) continue;
+    const ra = a.shrinkT > 0 ? 4 : 7, rb = b.shrinkT > 0 ? 4 : 7;
+    const dx = b.x - a.x, dy = b.y - a.y, d2 = dx * dx + dy * dy, rr = ra + rb;
+    if (d2 >= rr * rr || d2 < 0.0001) continue;
+    // 无敌星 / 压扁
+    if (a.starT > 0 && b.starT <= 0) { hitKart(R, b, 'shell'); continue; }
+    if (b.starT > 0 && a.starT <= 0) { hitKart(R, a, 'shell'); continue; }
+    if (a.shrinkT > 0 && b.shrinkT <= 0 && a.squishT <= 0) { a.squishT = 1.4; a.spinT = 0; sfxK(R, a, 'squish'); }
+    if (b.shrinkT > 0 && a.shrinkT <= 0 && b.squishT <= 0) { b.squishT = 1.4; b.spinT = 0; sfxK(R, b, 'squish'); }
+    const d = Math.sqrt(d2), nx = dx / d, ny = dy / d, ov = rr - d;
+    const wa = a.stats.weight * (a.shrinkT > 0 ? 0.4 : 1), wb = b.stats.weight * (b.shrinkT > 0 ? 0.4 : 1);
+    a.x -= nx * ov * wb / (wa + wb); a.y -= ny * ov * wb / (wa + wb);
+    b.x += nx * ov * wa / (wa + wb); b.y += ny * ov * wa / (wa + wb);
+    const rv = (b.vx - a.vx) * nx + (b.vy - a.vy) * ny;
+    if (rv < 0) {
+      const J = -1.6 * rv / (1 / wa + 1 / wb);
+      a.vx -= J / wa * nx; a.vy -= J / wa * ny; b.vx += J / wb * nx; b.vy += J / wb * ny;
+      if (-rv > 25 && (a.human >= 0 || b.human >= 0)) sfxK(R, a.human >= 0 ? a : b, 'bump');
+    }
+  }
+}
+
+// ------------------------------------------------------------------- AI
+function aiInput(k, R, dt) {
+  const T = R.track, N = T.N, ai = k.ai, sp = Math.hypot(k.vx, k.vy);
+  ai.t += dt;
+  let lane = ai.lane + Math.sin(ai.t * ai.freq + ai.phase) * 0.2;
+  if (ai.dodgeT > 0) { ai.dodgeT -= dt; lane = ai.dodge; }
+  const look = Math.max(6, Math.round((24 + sp * 0.42) / T.step));
+  const tx0 = -T.TY[k.idx], ty0 = T.TX[k.idx];
+  // 躲避香蕉与坑洞 / 岩浆
+  if (ai.dodgeT <= 0) {
+    const myLat = lane * T.hw;
+    const threats = [];
+    for (const p of R.proj) if (p.type === 'banana') threats.push({ x: p.x, y: p.y, r: 10 });
+    for (const h of T.hazards) { const rel = (h.i - k.idx + N) % N; if (rel > 2 && rel < look * 2.5) threats.push({ x: T.X[h.i] - T.TY[h.i] * h.lat, y: T.Y[h.i] + T.TX[h.i] * h.lat, r: h.r + 8 }); }
+    for (const t of threats) {
+      const dx = t.x - k.x, dy = t.y - k.y, d = Math.hypot(dx, dy);
+      if (d > 170 || d < 4) continue;
+      if (dx * Math.cos(k.angle) + dy * Math.sin(k.angle) <= 0) continue;
+      const latP = (t.x - T.X[k.idx]) * tx0 + (t.y - T.Y[k.idx]) * ty0;
+      if (Math.abs(latP - myLat) < t.r + 8) {
+        let want = latP > 0 ? latP - t.r - 16 : latP + t.r + 16;
+        if (Math.abs(want) > T.hw * 0.85) want = latP > 0 ? latP + t.r + 16 : latP - t.r - 16;
+        ai.dodge = clamp(want / T.hw, -0.85, 0.85); ai.dodgeT = 0.7; lane = ai.dodge; break;
+      }
+    }
+  }
+  const lat = clamp(lane, -0.85, 0.85) * T.hw, i = (k.idx + look) % N;
+  const tx = T.X[i] - T.TY[i] * lat, ty = T.Y[i] + T.TX[i] * lat;
+  const d = angDiff(k.angle, Math.atan2(ty - k.y, tx - k.x));
+  const steer = clamp(d * 3.2, -1, 1);
+  let kmax = 0;
+  for (let o = 0; o <= 3; o++) {
+    const a = (k.idx + o * 8 + 4) % N, b = (k.idx + o * 8 + 24) % N;
+    const da = Math.abs(angDiff(Math.atan2(T.TY[a], T.TX[a]), Math.atan2(T.TY[b], T.TX[b])));
+    kmax = Math.max(kmax, da / (20 * T.step));
+  }
+  ai.curv = kmax;
+  const vmax = kmax > 0.0005 ? 1.6 * k.stats.handling / kmax : 1e9;
+  // 橡皮筋：根据与玩家的差距调节 AI 速度
+  let mul = k.human >= 0 ? 0.92 : R.aiBase * ai.skill;
+  if (k.human < 0 && R.humanDist != null) {
+    const diff = k.dist - R.humanDist;
+    if (diff < -200) mul *= 1 + Math.min(0.12, (-diff - 200) / 2500);
+    else if (diff > 250) mul *= 1 - Math.min(0.1, (diff - 250) / 3000);
+  }
+  k.speedMul = mul;
+  if (R.items && R.phase === 'race') aiItems(k, R, dt);
+  if (sp < 10 && R.phase === 'race' && k.spinT <= 0 && k.squishT <= 0 && k.stallT <= 0 && !k.fall) {
+    ai.stuck += dt; if (ai.stuck > 2.5) { ai.stuck = 0; respawnKart(k, R); }
+  } else ai.stuck = 0;
+  return { steer, accel: sp < vmax, brake: sp > vmax * 1.25, drift: false, item: false };
+}
+function aiItems(k, R, dt) {
+  if (k.itemState !== 'ready') return;
+  const ai = k.ai; ai.itemTimer -= dt; if (ai.itemTimer > 0) return;
+  switch (k.item) {
+    case 'green': {
+      let ok = false;
+      for (const o of R.karts) {
+        if (o === k || o.fall) continue;
+        const dx = o.x - k.x, dy = o.y - k.y, d = Math.hypot(dx, dy);
+        if (d < 220 && d > 15 && Math.abs(angDiff(k.angle, Math.atan2(dy, dx))) < 0.18) ok = true;
+      }
+      if (ok || ai.itemTimer < -7) useItem(R, k, false);
+      break;
+    }
+    case 'mushroom': case 'triple':
+      if (ai.curv < 0.004 || ai.itemTimer < -5) { useItem(R, k, false); ai.itemTimer = 1.2; }
+      break;
+    default: useItem(R, k, false);
+  }
+}
+
+// -------------------------------------------------------------- render
+const cvs = document.getElementById('game'), ctx = cvs.getContext('2d');
+const hud = document.getElementById('hud'), hctx = hud.getContext('2d');
+const wrap = document.getElementById('wrap');
+ctx.imageSmoothingEnabled = false;
+const frameImg = ctx.createImageData(RW, RH), fb = new Uint32Array(frameImg.data.buffer);
+const bxCache = new Int32Array(RW);
+
+function renderFloor(v, R) {
+  const T = R.track, def = T.def, cam = v.cam, w = RW, h = v.h, oy = v.oy, hy = v.hy, f = v.f, H = v.H + cam.z;
+  const fx = Math.cos(cam.angle), fy = Math.sin(cam.angle), rx = -fy, ry = fx;
+  const bg = T.bg, BW = bg.W, BH = bg.H, bgd = bg.data;
+  const off = Math.floor(((cam.angle / TAU) % 1 + 1) * BW);
+  for (let x = 0; x < w; x++) bxCache[x] = (off + x) % BW;
+  const s0 = def.sky[0], s1 = def.sky[1];
+  for (let y = 0; y < hy; y++) {
+    const t = y / hy, sky = 0xff000000 | ((lerp(s0[2], s1[2], t) | 0) << 16) | ((lerp(s0[1], s1[1], t) | 0) << 8) | (lerp(s0[0], s1[0], t) | 0);
+    const by = BH - hy + y, row = (oy + y) * w;
+    if (by < 0) { fb.fill(sky, row, row + w); continue; }
+    const brow = by * BW;
+    for (let x = 0; x < w; x++) { const p = bgd[brow + bxCache[x]]; fb[row + x] = (p >>> 24) > 128 ? p : sky; }
+  }
+  const fr = def.fog[0], fg = def.fog[1], fbb = def.fog[2];
+  for (let y = hy; y < h; y++) {
+    const dy = y - hy + 0.5, dist = H * f / dy, sc = dist / f;
+    const cx = cam.x + fx * dist, cy = cam.y + fy * dist, sx = rx * sc, sy = ry * sc;
+    let wx = cx - sx * (w / 2), wy = cy - sy * (w / 2);
+    const lvl = sc < 1.3 ? 0 : sc < 2.6 ? 1 : sc < 5.2 ? 2 : sc < 10.4 ? 3 : 4;
+    const tex = T.mips[lvl], size = TS >> lvl, out = T.outMips[lvl], osz = 64 >> lvl, om = osz - 1;
+    const row = (oy + y) * w;
+    const fogA = clamp((dist - 1100) / 2600, 0, 0.85);
+    for (let x = 0; x < w; x++) {
+      const xi = Math.floor(wx), yi = Math.floor(wy);
+      let c;
+      if (xi >= 0 && yi >= 0 && xi < TS && yi < TS) c = tex[(yi >> lvl) * size + (xi >> lvl)];
+      else c = out[((yi >> lvl) & om) * osz + ((xi >> lvl) & om)];
+      if (fogA > 0) {
+        const r = c & 255, g = (c >> 8) & 255, b = (c >> 16) & 255;
+        c = 0xff000000 | (((b + (fbb - b) * fogA) | 0) << 16) | (((g + (fg - g) * fogA) | 0) << 8) | ((r + (fr - r) * fogA) | 0);
+      }
+      fb[row + x] = c;
+      wx += sx; wy += sy;
+    }
+  }
+}
+
+function renderSprites(v, R) {
+  const cam = v.cam, fx = Math.cos(cam.angle), fy = Math.sin(cam.angle), rx = -fy, ry = fx, H = v.H + cam.z, list = [], T = R.track;
+  const add = (x, y, z, fn, extra) => {
+    const dx = x - cam.x, dy = y - cam.y, rz = dx * fx + dy * fy;
+    if (rz < 4 || rz > 2400) return;
+    const s = v.f / rz, sx = RW / 2 + (dx * rx + dy * ry) * s;
+    if (sx < -120 || sx > RW + 120) return;
+    list.push({ rz, sx, gy: v.oy + v.hy + H * s, sy: v.oy + v.hy + (H - z) * s, s, fn, extra, camX: cam.x, camY: cam.y });
+  };
+  const bill = (img, wUnits, hUnits) => (o) => {
+    const w = wUnits * o.s, h = hUnits * o.s;
+    if (h < 0.5) return;
+    ctx.drawImage(img, Math.round(o.sx - w / 2), Math.round(o.sy - h), Math.max(1, Math.round(w)), Math.max(1, Math.round(h)));
+  };
+  const shadow = (o, r) => { ctx.fillStyle = 'rgba(0,0,0,.35)'; ctx.beginPath(); ctx.ellipse(o.sx, o.gy, r * o.s, r * o.s * 0.35, 0, 0, TAU); ctx.fill(); };
+  for (const o of T.obstacles) add(o.x, o.y, 0, bill(o.spr, o.spr.width / o.spr.height * o.h, o.h));
+  for (const o of T.decor) add(o.x, o.y, o.z + (o.float != null ? Math.sin(R.time * 2 + o.float) * 3 : 0), bill(o.spr, o.spr.width / o.spr.height * o.h, o.h));
+  const bf = Math.floor(performance.now() / 90) % 8;
+  for (const b of R.boxes) if (b.t <= 0) add(b.x, b.y, 3 + Math.sin(performance.now() / 300 + b.x) * 1.5, o => { shadow(o, 5); bill(SPR.box[(bf + (b.x | 0)) & 7], 12, 12)(o); });
+  const cf = Math.floor(performance.now() / 120) % 4;
+  for (const c of R.coins) if (c.alive) add(c.x, c.y, 2, bill(SPR.coin[cf], 8, 8));
+  for (const p of R.proj) {
+    if (p.type === 'banana') add(p.x, p.y, 0, bill(SPR.banana, 9, 9));
+    else add(p.x, p.y, 0, o => { shadow(o, 4); bill(SPR[p.type], 9, 9)(o); });
+  }
+  for (const p of R.parts) {
+    if (p.col === 'coin') { add(p.x, p.y, p.z, bill(SPR.coin[cf], p.size, p.size)); continue; }
+    add(p.x, p.y, p.z, o => { const sz = Math.max(1, p.size * o.s * 0.5); ctx.globalAlpha = clamp(p.life / p.max * 1.5, 0, 1); ctx.fillStyle = p.col; ctx.fillRect(Math.round(o.sx - sz / 2), Math.round(o.sy - sz / 2), Math.ceil(sz), Math.ceil(sz)); ctx.globalAlpha = 1; });
+  }
+  for (const k of R.karts) {
+    if (k.fall && !k.fall.placed && k.fall.t > 0.6) continue;
+    // 拖在身后的道具
+    if (k.itemState === 'hold' && k.item) { const ca = Math.cos(k.angle), sa = Math.sin(k.angle); add(k.x - ca * 12, k.y - sa * 12, 0, bill(SPR[k.item], 8, 8)); }
+    add(k.x, k.y, Math.max(k.z, -8), o => drawKart(k, o, R), null);
+    if (k.fall && k.fall.placed) add(k.x, k.y, k.z + 16, o => {
+      ctx.strokeStyle = '#ddd'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(o.sx + 6 * o.s, o.sy - 18 * o.s); ctx.lineTo(o.sx + 6 * o.s, o.sy - 4 * o.s); ctx.stroke();
+      bill(SPR.cloud, 20, 15)({ ...o, sy: o.sy - 4 * o.s });
+    });
+  }
+  list.sort((a, b) => b.rz - a.rz);
+  ctx.save(); ctx.beginPath(); ctx.rect(0, v.oy, RW, v.h); ctx.clip();
+  for (const o of list) o.fn(o);
+  ctx.restore();
+}
+function drawKart(k, o, R) {
+  if (k.invT > 0 && !k.fall && k.spinT <= 0 && Math.floor(performance.now() / 70) % 2) return;
+  let size = k.shrinkT > 0 ? 0.55 : 1, hMul = k.squishT > 0 ? 0.35 : 1;
+  if (k.fall && !k.fall.placed) size *= clamp(1 - k.fall.t / 0.7, 0.1, 1);
+  // 阴影
+  if (!k.fall || k.fall.placed) { ctx.fillStyle = 'rgba(0,0,0,.38)'; ctx.beginPath(); ctx.ellipse(o.sx, o.gy - 0.5, 8 * size * o.s, 2.6 * size * o.s, 0, 0, TAU); ctx.fill(); }
+  const vAng = Math.atan2(k.y - o.camY, k.x - o.camX);
+  let rel = k.angle - vAng + k.spinT * 13;
+  if (k.drift) rel += k.drift * 0.35;
+  rel = ((rel % TAU) + TAU) % TAU;
+  const fi = Math.round(rel / TAU * NA) % NA;
+  const img = k.frames[fi];
+  const W = SPR_UNITS * o.s * size, Hh = SPR_UNITS * o.s * size * hMul;
+  const x = o.sx - SPR_AX / SPR_SIZE * W, y = o.sy - SPR_AY / SPR_SIZE * Hh;
+  ctx.drawImage(img, Math.round(x), Math.round(y), Math.round(W), Math.round(Hh));
+  if (k.starT > 0 || k.boostT > 0 && k.boostPow > 1.42) {
+    ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = k.starT > 0 ? 0.55 + 0.35 * Math.sin(performance.now() / 50) : 0.25;
+    ctx.drawImage(img, Math.round(x), Math.round(y), Math.round(W), Math.round(Hh));
+    ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
+  }
+}
+
+// ------------------------------------------------------------------ HUD
+const PLACE_COL = ['#ffd700', '#dfe8f2', '#e89a4c'];
+function hudText(c, text, x, y, size, col = '#fff', align = 'left', italic = true) {
+  c.font = `${italic ? 'italic ' : ''}900 ${size}px "Arial Black","PingFang SC","Microsoft YaHei",sans-serif`;
+  c.textAlign = align; c.textBaseline = 'middle'; c.lineJoin = 'round';
+  c.lineWidth = Math.max(2, size * 0.2); c.strokeStyle = '#000'; c.strokeText(text, x, y);
+  c.fillStyle = col; c.fillText(text, x, y);
+}
+function drawHUD(R) {
+  const W = hud.width, Hh = hud.height, c = hctx;
+  c.clearRect(0, 0, W, Hh);
+  if (R.mode === 'attract' || G.scene !== 'race') return;
+  const u = W / RW, split = R.views.length > 1, T = R.track;
+  c.imageSmoothingEnabled = false;
+  for (const v of R.views) {
+    const k = v.kart, Y0 = v.oy * u, VH = v.h * u, S = u * (split ? 0.6 : 1);
+    // 道具栏
+    const bs = 36 * S, bx = 10 * S, by = Y0 + 8 * S;
+    c.fillStyle = 'rgba(0,0,0,.45)'; roundRect(c, bx, by, bs, bs, 6 * S); c.fill(); c.lineWidth = 2.5 * S; c.strokeStyle = '#fff'; c.stroke();
+    let icon = null;
+    if (k.itemState === 'roulette') { const n = ITEM_KEYS[Math.floor(performance.now() / 70) % ITEM_KEYS.length]; icon = n === 'coin' ? SPR.coin[0] : SPR[n]; }
+    else if (k.item) icon = itemIcon(k);
+    if (icon) c.drawImage(icon, bx + 4 * S, by + 4 * S, bs - 8 * S, bs - 8 * S);
+    if (k.itemState === 'hold') hudText(c, '拖行中', bx + bs / 2, by + bs + 7 * S, 7 * S, '#ffd23a', 'center', false);
+    // 时间
+    hudText(c, fmtTime(k.finished ? k.finishTime : R.time), W - 10 * S, Y0 + 15 * S, 13 * S, '#fff', 'right');
+    if (!split) k.lapTimes.forEach((t, i) => hudText(c, `${i + 1}圈  ${fmtTime(t)}`, W - 10 * S, Y0 + (31 + i * 11) * S, 8 * S, '#cfeaff', 'right', false));
+    // 金币 / 圈数
+    c.drawImage(SPR.coin[0], 9 * S, Y0 + VH - 45 * S, 15 * S, 15 * S);
+    hudText(c, `×${k.coins}`, 26 * S, Y0 + VH - 37 * S, 12 * S, k.coins >= 10 ? '#ffd23a' : '#fff');
+    hudText(c, `LAP ${clamp(k.lap, 1, R.laps)}/${R.laps}`, 10 * S, Y0 + VH - 15 * S, 14 * S, k.lap === R.laps ? '#ffd23a' : '#fff');
+    // 名次
+    if (R.karts.length > 1) {
+      const n = k.place, suf = n === 1 ? 'st' : n === 2 ? 'nd' : n === 3 ? 'rd' : 'th', size = 44 * S, x = W - 10 * S, y = Y0 + VH - 8 * S;
+      const font = sz => `italic 900 ${sz}px "Arial Black",sans-serif`;
+      c.textBaseline = 'alphabetic'; c.textAlign = 'right'; c.lineJoin = 'round';
+      c.font = font(size * 0.42); const sw = c.measureText(suf).width;
+      const g = c.createLinearGradient(0, y - size * 0.8, 0, y); g.addColorStop(0, '#fff'); g.addColorStop(1, PLACE_COL[n - 1] || '#7fc8ff');
+      c.lineWidth = size * 0.16; c.strokeStyle = '#000';
+      c.strokeText(suf, x, y); c.fillStyle = g; c.fillText(suf, x, y);
+      c.font = font(size); c.strokeText(String(n), x - sw - 2 * S, y); c.fillText(String(n), x - sw - 2 * S, y);
+    }
+    // 小地图 + 名次列表（单人画面）
+    if (!split) {
+      const ms = 80 * S, mx = W - ms - 8 * S, my = Y0 + 70 * S;
+      c.globalAlpha = 0.75; c.drawImage(T.mini, mx, my, ms, ms); c.globalAlpha = 1;
+      for (const o of [...R.karts].sort((a, b) => (a.human >= 0) - (b.human >= 0))) {
+        const px = mx + o.x / TS * ms, py = my + o.y / TS * ms, r = (o.human >= 0 ? 3.2 : 2.2) * S;
+        c.fillStyle = rgb(o.color); c.strokeStyle = o.human >= 0 ? '#fff' : '#000'; c.lineWidth = 1.2 * S;
+        c.beginPath(); c.arc(px, py, r, 0, TAU); c.fill(); c.stroke();
+      }
+      if (R.karts.length > 1 && R.order) {
+        R.order.forEach((o, i) => {
+          const y = Y0 + (54 + i * 14) * S, x = 10 * S;
+          hudText(c, String(i + 1), x + 4 * S, y + 6 * S, 8 * S, PLACE_COL[i] || '#fff', 'center');
+          c.fillStyle = o.human >= 0 ? 'rgba(255,210,58,.9)' : 'rgba(0,0,0,.45)'; c.fillRect(x + 10 * S, y, 13 * S, 12 * S);
+          c.drawImage(o.frames[NA / 2], 18, 4, 28, 26, x + 10.5 * S, y + 0.5 * S, 12 * S, 11 * S);
+        });
+      }
+    }
+    // 倒计时
+    if (R.phase === 'countdown' || R.time < 1) {
+      const lw = 66 * S, lh = 22 * S, lx = W / 2 - lw / 2, ly = Y0 + 16 * S, lit = R.phase === 'countdown' ? Math.floor(R.cd) + 1 : 3;
+      c.fillStyle = '#222'; roundRect(c, lx, ly, lw, lh, 5 * S); c.fill(); c.lineWidth = 2 * S; c.strokeStyle = '#000'; c.stroke();
+      for (let i = 0; i < 3; i++) {
+        c.fillStyle = R.phase !== 'countdown' ? '#3dff5a' : i < lit ? '#ff3a2a' : '#4a1a1a';
+        c.beginPath(); c.arc(lx + lw * (i + 1) / 4, ly + lh / 2, 7 * S, 0, TAU); c.fill();
+      }
+      if (R.phase === 'countdown') {
+        const n = 3 - Math.floor(R.cd), ph = R.cd % 1, sz = (52 + (1 - ph) * 20) * S;
+        hudText(c, String(n), W / 2, Y0 + VH * 0.45, sz, '#ffe14a', 'center');
+      } else hudText(c, 'GO!', W / 2, Y0 + VH * 0.45, 60 * S, '#5aff6a', 'center');
+    }
+    // 提示信息
+    const m = v.msgs[v.msgs.length - 1];
+    if (m) {
+      const pop = Math.min(1, m.t * 7), a = clamp((m.dur - m.t) / 0.3, 0, 1);
+      c.globalAlpha = a; hudText(c, m.text, W / 2, Y0 + VH * 0.3, (30 + (1 - pop) * 16) * S, m.col, 'center'); c.globalAlpha = 1;
+    }
+    if (k.wrongT > 1 && !k.finished && Math.floor(performance.now() / 300) % 2) hudText(c, '⟲ 逆行!', W / 2, Y0 + VH * 0.5, 28 * S, '#ff5a4a', 'center');
+    if (k.finished && R.karts.length > 1) hudText(c, `第 ${k.place} 名`, W / 2, Y0 + VH * 0.52, 26 * S, PLACE_COL[k.place - 1] || '#fff', 'center');
+  }
+}
+
+// ------------------------------------------------------------------- UI
+const G = { scene: 'boot', race: null, gp: null, paused: false, anim: null, lastOpts: null };
+const UI = {
+  root: document.getElementById('ui'), handler: null,
+  show(html) { this.root.innerHTML = html; this.root.classList.remove('hidden'); this.handler = null; G.anim = null; },
+  hide() { this.root.innerHTML = ''; this.root.classList.add('hidden'); this.handler = null; G.anim = null; },
+  key(a) { if (this.handler) this.handler(a); }
+};
+function listMenu({ title, sub, items, back, logo, footer, html }) {
+  let sel = items.findIndex(i => !i.disabled); if (sel < 0) sel = 0;
+  UI.show(`<div class="shade"></div><div class="panel${logo ? ' clear' : ''}">${logo || ''}${title ? `<div class="title">${title}</div>` : ''}${sub ? `<div class="sub">${sub}</div>` : ''}${html || ''}<div class="list"></div>${footer ? `<div class="hint">${footer}</div>` : ''}</div>`);
+  const list = UI.root.querySelector('.list');
+  const btns = items.map((it, i) => {
+    const b = document.createElement('button'); b.className = 'btn' + (it.disabled ? ' dis' : ''); b.innerHTML = it.label;
+    b.onmouseenter = () => { if (!it.disabled) { sel = i; upd(); } };
+    b.onclick = () => { SND.init(); if (!it.disabled) { sfx('select'); it.action(); } };
+    list.appendChild(b); return b;
+  });
+  const upd = () => btns.forEach((b, i) => b.classList.toggle('sel', i === sel));
+  upd();
+  UI.handler = a => {
+    if (a === 'up' || a === 'down') {
+      const d = a === 'up' ? -1 : 1; let n = sel;
+      for (let k = 0; k < items.length; k++) { n = (n + d + items.length) % items.length; if (!items[n].disabled) break; }
+      sel = n; sfx('move'); upd();
+    } else if (a === 'ok') { sfx('select'); items[sel].action(); }
+    else if (a === 'back' && back) { sfx('back'); back(); }
+  };
+}
+function cardMenu({ title, sub, cards, init = 0, onPick, back, tick, footer }) {
+  UI.show(`<div class="shade"></div><div class="panel"><div class="title">${title}</div>${sub ? `<div class="sub">${sub}</div>` : ''}<div class="cards"></div>${footer ? `<div class="hint">${footer}</div>` : ''}</div>`);
+  const box = UI.root.querySelector('.cards'); let sel = init;
+  const els = cards.map((cd, i) => {
+    const el = document.createElement('div'); el.className = 'card' + (cd.disabled ? ' dis' : ''); el.innerHTML = cd.html;
+    el.onmouseenter = () => { if (!cd.disabled) { sel = i; upd(); } };
+    el.onclick = () => { SND.init(); if (!cd.disabled) { sfx('select'); onPick(i); } };
+    box.appendChild(el); return el;
+  });
+  const upd = () => els.forEach((e, i) => e.classList.toggle('sel', i === sel));
+  upd();
+  UI.handler = a => {
+    if (a === 'left' || a === 'right' || a === 'up' || a === 'down') {
+      const d = (a === 'left' || a === 'up') ? -1 : 1; let n = sel;
+      for (let k = 0; k < cards.length; k++) { n = (n + d + cards.length) % cards.length; if (!cards[n].disabled) break; }
+      sel = n; sfx('move'); upd();
+    } else if (a === 'ok') { sfx('select'); onPick(sel); }
+    else if (a === 'back' && back) { sfx('back'); back(); }
+  };
+  if (tick) G.anim = t => tick(sel, t, els);
+}
+
+const LOGO = `<div class="logo">SUPER PIXEL KART</div><div class="logo2">超级像素赛车</div>`;
+function ensureAttract() {
+  if (G.race && G.race.mode === 'attract') return;
+  stopEngines(G.race);
+  const grid = [...CHARS, ...AI_ONLY].map(d => ({ def: d, human: -1 })).sort(() => Math.random() - 0.5);
+  G.race = createRace({ trackIdx: TRACK_CACHE.ti >= 0 ? TRACK_CACHE.ti : 0, mode: 'attract', cc: 150, grid });
+}
+function titleScreen() {
+  G.scene = 'title'; G.paused = false; G.gp = null;
+  ensureAttract();
+  if (MUSIC.want !== 'menu') MUSIC.play('menu');
+  listMenu({
+    logo: LOGO, items: [
+      { label: '单人大奖赛', action: () => ccMenu(cc => pickChars(1, chars => startGP(chars, cc))) },
+      { label: '双人大奖赛（分屏）', action: () => ccMenu(cc => pickChars(2, chars => startGP(chars, cc))) },
+      { label: '双人对决（分屏）', action: () => ccMenu(cc => pickChars(2, chars => pickTrack(false, ti => startVS(chars, cc, ti)))) },
+      { label: '计时赛', action: () => pickChars(1, chars => pickTrack(true, ti => startTT(chars[0], ti))) },
+      { label: '操作说明', action: helpScreen },
+      { label: `声音：${SND.muted ? '关' : '开'}`, action: () => { SND.toggleMute(); titleScreen(); } },
+    ], footer: '方向键 / WASD 选择 · Enter 确认 · Esc 返回 · M 静音 · 支持手柄<br>同人致敬作品：角色、赛道、音乐与音效均为原创程序化生成'
+  });
+}
+function ccMenu(next) {
+  listMenu({
+    title: '选择排气量', sub: '排气量越大，速度越快、对手越强', back: titleScreen, items: [
+      { label: '50cc　入门', action: () => next(50) }, { label: '100cc　标准', action: () => next(100) }, { label: '150cc　高手', action: () => next(150) },
+    ]
+  });
+}
+function statBars(s) {
+  const b = (n, v) => `<div class="statl">${n}</div><div class="bar"><i style="width:${clamp((v - 0.7) / 0.75, 0.08, 1) * 100}%"></i></div>`;
+  return b('极速', s.speed * 1.25 - 0.2) + b('加速', s.accel) + b('操控', s.handling) + b('重量', s.weight);
+}
+function pickChars(n, done) {
+  const chosen = [];
+  const step = () => {
+    const p = chosen.length;
+    if (p >= n) return done(chosen);
+    const init = CHARS.findIndex((c, i) => !chosen.includes(i));
+    cardMenu({
+      title: n > 1 ? `${p + 1}P 选择角色` : '选择角色', sub: n > 1 ? `${p + 1}P 用 ${p === 0 ? 'A / D' : '← / →'} 或方向键选择，Enter 确认` : '',
+      cards: CHARS.map((c, i) => ({ disabled: chosen.includes(i), html: `<canvas width="64" height="64"></canvas><div class="nm">${c.name}</div><div class="ds">${c.en} · ${c.desc}</div>${statBars(c.stats)}` })),
+      init, onPick: i => { chosen.push(i); step(); },
+      back: () => { if (chosen.length) { chosen.pop(); step(); } else titleScreen(); },
+      tick: (sel, t, els) => els.forEach((el, i) => {
+        const cv = el.querySelector('canvas'), c = cv.getContext('2d');
+        c.clearRect(0, 0, 64, 64); c.drawImage(CHARS[i].frames[i === sel ? Math.floor(t * 9) % NA : 14], 0, 0);
+      }),
+    });
+  };
+  step();
+}
+function pickTrack(tt, done) {
+  cardMenu({
+    title: '选择赛道', back: titleScreen,
+    cards: TRACKS.map(t => {
+      const rec = load('spk_tt_' + t.id, {});
+      return { html: `<canvas width="128" height="128"></canvas><div class="nm">${t.name}</div><div class="ds">${t.en}</div>${tt ? `<div class="ds">最佳总时间 ${fmtTime(rec.total)}<br>最快单圈 ${fmtTime(rec.lap)}</div>` : ''}` };
+    }),
+    onPick: done,
+    tick: (sel, t, els) => els.forEach((el, i) => { const cv = el.querySelector('canvas'), c = cv.getContext('2d'); if (!cv._d) { c.drawImage(trackPreview(i), 0, 0); cv._d = 1; } }),
+  });
+}
+function helpScreen() {
+  listMenu({
+    title: '操作说明', back: titleScreen, items: [{ label: '返回', action: titleScreen }],
+    html: `<div class="keys">
+<div><b>单人</b></div><div><b>双人 1P</b></div><div><b>双人 2P</b></div>
+<div>方向 <kbd>←</kbd><kbd>→</kbd> / <kbd>A</kbd><kbd>D</kbd></div><div>方向 <kbd>A</kbd><kbd>D</kbd></div><div>方向 <kbd>←</kbd><kbd>→</kbd></div>
+<div>油门 <kbd>↑</kbd> / <kbd>W</kbd></div><div>油门 <kbd>W</kbd></div><div>油门 <kbd>↑</kbd></div>
+<div>刹车/倒车 <kbd>↓</kbd> / <kbd>S</kbd></div><div>刹车 <kbd>S</kbd></div><div>刹车 <kbd>↓</kbd></div>
+<div>跳跃/漂移 <kbd>空格</kbd> / <kbd>Shift</kbd></div><div>漂移 <kbd>F</kbd> / <kbd>左Shift</kbd></div><div>漂移 <kbd>/</kbd> / <kbd>L</kbd> / <kbd>右Shift</kbd></div>
+<div>道具 <kbd>X</kbd> / <kbd>E</kbd> / <kbd>Z</kbd></div><div>道具 <kbd>G</kbd> / <kbd>Q</kbd></div><div>道具 <kbd>.</kbd> / <kbd>K</kbd> / <kbd>Enter</kbd></div>
+</div>
+<div class="hint" style="text-align:left">
+手柄：A 油门 · B 刹车 · RB/RT 漂移 · X/LB/LT 道具 · Start 暂停　|　<kbd>Esc</kbd>/<kbd>P</kbd> 暂停 · <kbd>M</kbd> 静音<br>
+★ <b>漂移加速</b>：转弯时按住漂移键起跳，落地后保持方向即进入漂移；火花由白→<span style="color:#3cc8ff">蓝</span>→<span style="color:#ff9a1a">橙</span>，松开漂移键获得加速（橙色更久）。<br>
+★ <b>起跑加速</b>：倒计时数字「2」出现后再按住油门；按得太早会熄火。<br>
+★ <b>道具</b>：香蕉/龟壳按住道具键可拖在车后当盾牌，松开放出；按住刹车再松开可向后发射龟壳。<br>
+★ <b>金币</b>：最多 10 枚，越多极速越高；被撞或掉落会丢失。加速板、蘑菇、星星都能无视草地减速。
+</div>`
+  });
+}
+
+function startGP(chars, cc) {
+  const racers = chars.map((ci, p) => ({ def: CHARS[ci], human: p, points: 0, lastPlace: 9 }));
+  const pool = [...CHARS.filter((c, i) => !chars.includes(i)), ...AI_ONLY];
+  while (racers.length < 8) racers.push({ def: pool.shift(), human: -1, points: 0, lastPlace: 9 });
+  G.gp = { cc, racers, raceIdx: 0, n: chars.length };
+  runGPRace();
+}
+function runGPRace() {
+  const gp = G.gp;
+  const grid = gp.raceIdx === 0
+    ? [...gp.racers.filter(r => r.human < 0).sort(() => Math.random() - 0.5), ...gp.racers.filter(r => r.human >= 0)]
+    : [...gp.racers].sort((a, b) => b.points - a.points || a.lastPlace - b.lastPlace);
+  beginRace({ trackIdx: gp.raceIdx, mode: 'gp', cc: gp.cc, grid });
+}
+function startVS(chars, cc, ti) { beginRace({ trackIdx: ti, mode: 'vs', cc, grid: chars.map((ci, p) => ({ def: CHARS[ci], human: p })) }); }
+function startTT(ci, ti) { beginRace({ trackIdx: ti, mode: 'tt', cc: 150, grid: [{ def: CHARS[ci], human: 0 }] }); }
+function beginRace(opts) {
+  G.lastOpts = opts;
+  UI.show(`<div class="shade"></div><div class="loading">${TRACKS[opts.trackIdx].name} 加载中…</div>`);
+  MUSIC.stop(); stopEngines(G.race);
+  setTimeout(() => { G.race = createRace(opts); G.scene = 'race'; G.paused = false; UI.hide(); }, 40);
+}
+function onRaceDone(R) {
+  G.scene = 'results';
+  updateEngines(R);
+  MUSIC.play('menu');
+  const T = R.track, order = R.order.slice();
+  const est = k => k.finished ? k.finishTime : R.time + Math.max(0, (R.laps + 1) * T.L - k.dist) / (R.base * 0.85);
+  const row = (cls, cells) => `<tr class="${cls}">${cells.map((x, i) => `<td${i === 0 ? ' class="pl"' : ''}>${x}</td>`).join('')}</tr>`;
+  if (R.mode === 'gp') {
+    const gp = G.gp;
+    order.forEach((k, i) => { k.gp.points += POINTS[i] || 0; k.gp.lastPlace = i + 1; });
+    const rows = order.map((k, i) => row(k.human >= 0 ? 'me' : '', [i + 1, k.name + (k.human >= 0 ? ` (${k.human + 1}P)` : ''), fmtTime(est(k)), `+${POINTS[i] || 0}`, `${k.gp.points} 分`])).join('');
+    const last = gp.raceIdx >= TRACKS.length - 1;
+    listMenu({
+      title: `第 ${gp.raceIdx + 1} 场 · ${T.def.name} 结果`, html: `<table class="res">${rows}</table>`, items: [
+        { label: last ? '查看最终排名' : '下一场', action: () => { if (last) gpFinal(); else { gp.raceIdx++; runGPRace(); } } },
+        { label: '退出到标题', action: titleScreen },
+      ]
+    });
+  } else if (R.mode === 'vs') {
+    const rows = order.map((k, i) => row('me', [i + 1, `${k.human + 1}P ${k.name}`, fmtTime(est(k))])).join('');
+    listMenu({
+      title: `${order[0].human + 1}P 获胜！`, html: `<table class="res">${rows}</table>`, items: [
+        { label: '再来一次', action: () => beginRace(G.lastOpts) },
+        { label: '换赛道', action: () => pickTrack(false, ti => beginRace({ ...G.lastOpts, trackIdx: ti })) },
+        { label: '退出到标题', action: titleScreen },
+      ]
+    });
+  } else {
+    const k = R.humans[0], total = k.finishTime, bestLap = Math.min(...k.lapTimes), key = 'spk_tt_' + T.def.id, rec = load(key, {});
+    const newTotal = !rec.total || total < rec.total, newLap = !rec.lap || bestLap < rec.lap;
+    if (newTotal) rec.total = total; if (newLap) rec.lap = bestLap; store(key, rec);
+    const rows = k.lapTimes.map((t, i) => row(t === bestLap ? 'me' : '', [`第${i + 1}圈`, fmtTime(t)])).join('') + row('', ['总计', fmtTime(total)]);
+    listMenu({
+      title: `${T.def.name} 计时赛`, sub: (newTotal ? '🏁 新纪录：总时间！ ' : `纪录 ${fmtTime(rec.total)} `) + (newLap ? '⚡ 新纪录：最快单圈！' : `最快圈 ${fmtTime(rec.lap)}`),
+      html: `<table class="res">${rows}</table>`, items: [
+        { label: '再来一次', action: () => beginRace(G.lastOpts) },
+        { label: '换赛道', action: () => pickTrack(true, ti => beginRace({ ...G.lastOpts, trackIdx: ti })) },
+        { label: '退出到标题', action: titleScreen },
+      ]
+    });
+  }
+}
+function gpFinal() {
+  const gp = G.gp, st = [...gp.racers].sort((a, b) => b.points - a.points || a.lastPlace - b.lastPlace);
+  const cup = ['🏆 金杯', '🥈 银杯', '🥉 铜杯'];
+  const rows = st.map((r, i) => `<tr class="${r.human >= 0 ? 'me' : ''}"><td class="pl">${i + 1}</td><td>${r.def.name}${r.human >= 0 ? ` (${r.human + 1}P)` : ''}</td><td>${r.points} 分</td></tr>`).join('');
+  const lines = st.map((r, i) => r.human >= 0 ? `${gp.n > 1 ? r.human + 1 + 'P ' : ''}${i < 3 ? cup[i] + '！' : `第 ${i + 1} 名，再接再厉！`}` : null).filter(Boolean).join('　');
+  sfx('finish');
+  listMenu({ title: `${gp.cc}cc 大奖赛 最终排名`, sub: `<span class="big">${lines}</span>`, html: `<table class="res">${rows}</table>`, items: [{ label: '返回标题', action: titleScreen }] });
+}
+function pauseGame() {
+  if (G.scene !== 'race' || G.paused) return;
+  G.paused = true; MUSIC.paused = true; updateEngines(G.race);
+  const resume = () => { UI.hide(); G.paused = false; MUSIC.paused = false; };
+  listMenu({ title: '暂停', back: resume, items: [{ label: '继续', action: resume }, { label: '重新开始', action: () => beginRace(G.lastOpts) }, { label: '退出到标题', action: titleScreen }] });
+}
+function updateEngines(R) {
+  if (!SND.ctx || !R) return;
+  const active = G.scene === 'race' && !G.paused && R.mode !== 'attract';
+  if (active && R.engines.length === 0 && R.humans.length) R.engines = R.humans.map(() => SND.makeEngine());
+  R.engines.forEach((e, i) => {
+    if (!e) return;
+    const k = R.humans[i], sp = Math.hypot(k.vx, k.vy);
+    e.update(clamp(sp / (R.base * 1.2), 0, 1.3), active && k.drift !== 0 && k.z <= 0, k.boostT > 0, active ? (R.humans.length > 1 ? 0.6 : 1) : 0);
+  });
+}
+function stopEngines(R) { if (R && R.engines) { R.engines.forEach(e => e && e.stop()); R.engines = []; } }
+
+// ----------------------------------------------------------- main loop
+function renderAll() {
+  const R = G.race;
+  if (!R) { ctx.fillStyle = '#000'; ctx.fillRect(0, 0, RW, RH); hctx.clearRect(0, 0, hud.width, hud.height); return; }
+  for (const v of R.views) renderFloor(v, R);
+  ctx.putImageData(frameImg, 0, 0);
+  for (const v of R.views) renderSprites(v, R);
+  if (R.views.length > 1) { ctx.fillStyle = '#000'; ctx.fillRect(0, 107, RW, 2); }
+  if (R.flash > 0) { ctx.fillStyle = `rgba(255,255,255,${Math.min(1, R.flash)})`; ctx.fillRect(0, 0, RW, RH); }
+  drawHUD(R);
+}
+const padPrev = {};
+function pollPads() {
+  getPads().forEach((p, pi) => {
+    const b = i => p.buttons[i] && p.buttons[i].pressed, ax = p.axes[0] || 0, ay = p.axes[1] || 0;
+    const st = { up: b(12) || ay < -0.6, down: b(13) || ay > 0.6, left: b(14) || ax < -0.6, right: b(15) || ax > 0.6, ok: b(0), back: b(1), start: b(9) };
+    for (const key in st) {
+      const id = pi + key;
+      if (st[key] && !padPrev[id]) {
+        SND.init();
+        if (UI.handler) UI.key(key === 'start' ? 'ok' : key);
+        else if (key === 'start' && G.scene === 'race') pauseGame();
+      }
+      padPrev[id] = st[key];
+    }
+  });
+}
+let lastT = 0, accT = 0;
+function frame(now) {
+  const dt = Math.min(0.1, (now - lastT) / 1000); lastT = now;
+  pollPads();
+  const R = G.race;
+  if (R && !G.paused) {
+    accT += dt; let n = 0;
+    while (accT >= STEP && n < 6) { stepRace(G.race, STEP); accT -= STEP; n++; }
+    if (n >= 6) accT = 0;
+    updateEngines(G.race);
+  }
+  renderAll();
+  if (G.anim) G.anim(now / 1000);
+  requestAnimationFrame(frame);
+}
+
+addEventListener('keydown', e => {
+  if (PREVENT.has(e.code)) e.preventDefault();
+  SND.init();
+  if (e.repeat) return;
+  KEYS.add(e.code);
+  if (e.code === 'KeyM') { SND.toggleMute(); return; }
+  if (UI.handler) { const a = MENU_MAP[e.code]; if (a) UI.key(a); return; }
+  if (G.scene === 'race' && (e.code === 'Escape' || e.code === 'KeyP')) pauseGame();
+});
+addEventListener('keyup', e => KEYS.delete(e.code));
+addEventListener('blur', () => KEYS.clear());
+addEventListener('pointerdown', () => SND.init());
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) { pauseGame(); if (SND.ctx) SND.ctx.suspend(); }
+  else if (SND.ctx) SND.ctx.resume();
+});
+function resize() {
+  const ww = innerWidth, wh = innerHeight; let w = ww, h = ww * 9 / 16;
+  if (h > wh) { h = wh; w = wh * 16 / 9; }
+  wrap.style.width = w + 'px'; wrap.style.height = h + 'px'; wrap.style.fontSize = (h / 26) + 'px';
+  const dpr = Math.min(2, devicePixelRatio || 1);
+  hud.width = Math.round(w * dpr); hud.height = Math.round(h * dpr);
+}
+addEventListener('resize', resize);
+function boot() {
+  resize();
+  UI.show('<div class="loading">加载中…</div>');
+  setTimeout(() => {
+    buildSprites();
+    for (const d of [...CHARS, ...AI_ONLY]) d.frames = renderVoxelFrames(buildVoxels(d));
+    titleScreen();
+    requestAnimationFrame(t => { lastT = t; requestAnimationFrame(frame); });
+  }, 20);
+}
+boot();
+</script>
+</body>
+</html>
